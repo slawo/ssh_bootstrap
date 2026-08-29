@@ -1,0 +1,31 @@
+---
+- name: Verify successful SSH credential discovery
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    integration_password: integration-secret
+  tasks:
+    - name: Try a rejected password followed by the valid password
+      slawo.ssh_bootstrap.discover_credentials:
+        host: 127.0.0.1
+        port: 22222
+        credentials:
+          - username: bootstrap
+            password: rejected-secret
+          - username: bootstrap
+            password: "{{ integration_password }}"
+        host_key_checking: accept-new
+        timeout: 5
+      register: discovery
+      no_log: true
+
+    - name: Verify the successful candidate was returned
+      ansible.builtin.assert:
+        that:
+          - not discovery.changed
+          - discovery.attempts == 2
+          - discovery.credentials.username == 'bootstrap'
+          - discovery.credentials.password == integration_password
+          - not discovery.onboarding_cancelled
+      no_log: true

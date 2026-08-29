@@ -53,3 +53,57 @@ jobs:
 
       - name: Build collection
         run: ansible-galaxy collection build --output-path dist --force
+
+  integration:
+    name: SSH happy path
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: python -m pip install "ansible-core~=2.21.0" pexpect
+
+      - name: Build and install collection artifact
+        run: |
+          ansible-galaxy collection build --output-path dist --force
+          ansible-galaxy collection install \
+            --collections-path "${RUNNER_TEMP}/collections" \
+            --force \
+            dist/slawo-ssh_bootstrap-*.tar.gz
+
+      - name: Build SSH fixture
+        run: docker build --tag ssh-bootstrap-integration tests/integration/fixtures/sshd
+
+      - name: Start SSH fixture
+        run: docker run --detach --name ssh-bootstrap-integration --publish 22222:22 ssh-bootstrap-integration
+
+      - name: Wait for SSH fixture
+        run: |
+          for attempt in $(seq 1 30); do
+            if ssh-keyscan -p 22222 127.0.0.1 >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs ssh-bootstrap-integration
+          exit 1
+
+      - name: Run happy-path integration test
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/collections
+        run: ansible-playbook tests/integration/happy_path.yml
+
+      - name: Show SSH fixture logs after failure
+        if: failure()
+        run: docker logs ssh-bootstrap-integration
+
+      - name: Remove SSH fixture
+        if: always()
+        run: docker rm --force ssh-bootstrap-integration
