@@ -28,7 +28,6 @@ SUDO_INSTALL_COMMANDS = {
     "apt": "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo",
     "dnf": "dnf install -y sudo",
     "pacman": "pacman --sync --refresh --sysupgrade --noconfirm && pacman --sync --noconfirm sudo",
-    "pkg_add": "pkg_add sudo",
 }
 
 
@@ -74,6 +73,8 @@ def detect_platform(run: Callable[..., dict[str, Any]], connection: dict[str, An
 
 
 def sudo_install_command(platform: dict[str, str]) -> str:
+    if platform["package_manager"] == "pkg_add":
+        raise ValueError("OpenBSD uses base-system doas and does not install sudo")
     try:
         return SUDO_INSTALL_COMMANDS[platform["package_manager"]]
     except KeyError as exc:

@@ -10,7 +10,8 @@ module: discover_credentials
 short_description: Discover and prepare privileged SSH access
 description:
   - Tries ordered password-authenticated SSH candidates from the controller.
-  - Verifies UID 0 or working sudo access, optionally installs sudo, and provisions one onboarding user.
+  - Verifies UID 0 or native privilege escalation, using sudo on Linux and doas on OpenBSD.
+  - Optionally installs sudo on supported Linux systems and provisions one onboarding user.
   - Handles common forced password-change and first-login user prompts.
 version_added: "0.1.0"
 author:
@@ -55,7 +56,9 @@ options:
         description: Desired automation account password.
         type: str
       passwordless_sudo:
-        description: Grant the automation account sudo without a password.
+        description:
+          - Grant passwordless privilege escalation to the automation account.
+          - This creates a NOPASSWD sudo rule on Linux or a nopass doas rule on OpenBSD.
         type: bool
         default: true
   root:
@@ -74,11 +77,13 @@ options:
         type: bool
         default: true
       disable_after_onboarding:
-        description: Disable SSH for the privileged username after reconnect and sudo verification.
+        description: Disable SSH for the privileged username after reconnect and privilege verification.
         type: bool
         default: false
   install_sudo:
-    description: Install sudo when privileged access exists but sudo is unavailable.
+    description:
+      - Install sudo on supported Linux systems when unavailable.
+      - OpenBSD always uses its base-system doas implementation and never installs sudo.
     type: bool
     default: true
   return_password:

@@ -53,6 +53,10 @@ class PlatformTests(unittest.TestCase):
         self.assertIn("-y", dnf)
         self.assertIn("--noconfirm", pacman)
 
+    def test_openbsd_never_installs_sudo(self):
+        with self.assertRaisesRegex(ValueError, "base-system doas"):
+            MODULE.sudo_install_command({"family": "openbsd", "package_manager": "pkg_add"})
+
 
 if __name__ == "__main__":
     unittest.main()

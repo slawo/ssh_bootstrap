@@ -2,7 +2,7 @@
 
 This collection discovers initial SSH credentials from an ordered set of username/password candidates. It runs on the Ansible controller, before Ansible has authenticated to the target.
 
-The action plugin can answer common forced-password-change and create-user prompts. It then verifies real privileged access, installs `sudo` when allowed, provisions one automation user, and optionally disables privileged SSH login behind a timed rollback guard.
+The action plugin can answer common forced-password-change and create-user prompts. It then verifies real privileged access, uses native `doas` on OpenBSD or `sudo` on Linux, installs `sudo` on Linux when allowed, provisions one automation user, and optionally disables privileged SSH login behind a timed rollback guard.
 
 ## Requirements
 
@@ -79,12 +79,12 @@ vault_bootstrap_credentials:
 | `host_key_checking` | no | `yes` | `yes` requires a trusted key; `accept-new` trusts only unseen keys. |
 | `onboarding.username` | no | | Desired user. Must be supplied with `onboarding.password`. |
 | `onboarding.password` | no | | Desired user password. Must be supplied with `onboarding.username`. |
-| `onboarding.passwordless_sudo` | no | `true` | Grant passwordless sudo; when false, sudo requires the onboarding password. |
+| `onboarding.passwordless_sudo` | no | `true` | Grant passwordless escalation: NOPASSWD sudo on Linux or nopass doas on OpenBSD. When false, the native tool requires the onboarding password. |
 | `root.username` | no | `root` | Preferred privileged account name; UID 0 remains the authority check. |
 | `root.password` | no | | Try this privileged password before fallback credentials and set it after privileged login. |
 | `root.login` | no | `true` | Permit direct SSH attempts for `root.username`. |
-| `root.disable_after_onboarding` | no | `false` | Disable SSH for `root.username` only after onboarding SSH and sudo verification. |
-| `install_sudo` | no | `true` | Install sudo with the detected platform package manager when missing. |
+| `root.disable_after_onboarding` | no | `false` | Disable SSH for `root.username` only after onboarding SSH and privilege verification. |
+| `install_sudo` | no | `true` | Install sudo with the detected Linux package manager when missing. OpenBSD always uses base-system doas. |
 | `return_password` | no | `false` | Include preferred credentials' password in the result. Discovered fallback passwords are always returned. |
 | `prompt_patterns` | no | built-ins | Named Python regex overrides for unusual appliances. |
 | `debug` | no | `false` | Return sanitized per-attempt SSH sessions in `sessions`. |
@@ -100,7 +100,7 @@ The result provides `credentials` (`username`, `uid`, `is_root`, and conditional
 - Pre-populate `known_hosts` where possible. Use `accept-new` only on controlled provisioning networks.
 - Probing can trigger account lockout; keep candidate lists short and ordered.
 - Vendor prompts vary; test regex overrides on an isolated target.
-- Privileged SSH disabling is applied from the verified onboarding user's sudo session. The active SSH service and its reload mechanism are selected before any configuration change. A watchdog restores the previous configuration after 60 seconds unless a new SSH connection and sudo-to-UID0 verification succeed.
+- Privileged SSH disabling is applied from the verified onboarding user's sudo or doas session. The active SSH service and its reload mechanism are selected before any configuration change. A watchdog restores the previous configuration after 60 seconds unless a new SSH connection and escalation-to-UID0 verification succeed.
 - Check mode skips probing because authentication and onboarding can affect security state.
 
 ## Validation

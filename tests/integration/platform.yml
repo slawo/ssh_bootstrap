@@ -7,6 +7,7 @@
     integration_password: integration-secret
     integration_port: 22225
     expect_root: false
+    expect_method: sudo
   tasks:
     - name: Try a rejected password followed by the platform password
       slawo.ssh_bootstrap.discover_credentials:
@@ -32,6 +33,6 @@
           - ((discovery.credentials.uid | int) == 0) == expect_root
           - discovery.credentials.is_root == expect_root
           - discovery.become.enabled == (not expect_root)
-          - expect_root or discovery.become.method == 'sudo'
+          - expect_root or discovery.become.method == expect_method
           - discovery.become.user == 'root'
       no_log: true

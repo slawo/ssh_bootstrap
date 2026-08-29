@@ -34,11 +34,16 @@ def ssh_argv(host: str, port: int, username: str, host_key_checking: str, comman
     return [*_base_ssh_argv(host, port, username, host_key_checking), "sh", "-c", shlex.quote(wrapped)]
 
 
-def script_argv(host: str, port: int, username: str, host_key_checking: str, become: bool) -> list[str]:
+def script_argv(host: str, port: int, username: str, host_key_checking: str,
+                become_method: str | None) -> list[str]:
     shell = f"printf '{READY_MARKER}\\n'; exec sh -s"
     remote = ["sh", "-c", shlex.quote(shell)]
-    if become:
+    if become_method == "sudo":
         remote = ["sudo", "-S", "-p", shlex.quote(SUDO_PROMPT), "--", *remote]
+    elif become_method == "doas":
+        remote = ["doas", *remote]
+    elif become_method is not None:
+        raise ValueError(f"unsupported become method: {become_method}")
     return [*_base_ssh_argv(host, port, username, host_key_checking), *remote]
 
 
@@ -60,6 +65,7 @@ def run_command(*, host: str, port: int, username: str, password: str, host_key_
                 HOST_KEY_PATTERN, pexpect.EOF, pexpect.TIMEOUT]
     transcript: list[str] = []
     login_password_sent = False
+    escalation_password_sent = False
 
     def outcome(**values: Any) -> dict[str, Any]:
         output = _redacted("".join(transcript), (password, sudo_password))
@@ -76,12 +82,16 @@ def run_command(*, host: str, port: int, username: str, password: str, host_key_
                 return outcome(success=True, rc=int(child.match.group(1)))
             if matched == 1:
                 if login_password_sent:
-                    return outcome(success=False, reason="unexpected repeated SSH password prompt")
-                child.sendline(password)
-                login_password_sent = True
+                    if sudo_password is None or escalation_password_sent:
+                        return outcome(success=False, reason="unexpected repeated password prompt")
+                    child.sendline(sudo_password)
+                    escalation_password_sent = True
+                else:
+                    child.sendline(password)
+                    login_password_sent = True
             elif matched == 2:
                 if sudo_password is None:
-                    return outcome(success=False, reason="sudo requested a password but none was available")
+                    return outcome(success=False, reason="privilege escalation requested a password but none was available")
                 child.sendline(sudo_password)
             elif matched == 3:
                 return outcome(success=False, reason="authentication rejected")
@@ -98,16 +108,18 @@ def run_command(*, host: str, port: int, username: str, password: str, host_key_
 
 
 def run_script(*, host: str, port: int, username: str, password: str, host_key_checking: str,
-               script: str, timeout: int, become: bool = False, sudo_password: str | None = None,
+               script: str, timeout: int, become_method: str | None = None,
+               sudo_password: str | None = None,
                secrets: tuple[str, ...] = (), debug: bool = False) -> dict[str, Any]:
     if pexpect is None:
         raise RuntimeError("pexpect is required")
-    argv = script_argv(host, port, username, host_key_checking, become)
+    argv = script_argv(host, port, username, host_key_checking, become_method)
     child = pexpect.spawn(argv[0], argv[1:], encoding="utf-8", timeout=timeout, echo=False)
     patterns = [re.escape(READY_MARKER), RESULT_PATTERN, LOGIN_PASSWORD_PATTERN, re.escape(SUDO_PROMPT),
                 DENIED_PATTERN, HOST_KEY_PATTERN, pexpect.EOF, pexpect.TIMEOUT]
     transcript: list[str] = []
     login_password_sent = False
+    escalation_password_sent = False
     payload_sent = False
 
     def outcome(**values: Any) -> dict[str, Any]:
@@ -135,12 +147,16 @@ def run_script(*, host: str, port: int, username: str, password: str, host_key_c
                 return outcome(success=True, rc=int(child.match.group(1)))
             elif matched == 2:
                 if login_password_sent:
-                    return outcome(success=False, reason="unexpected repeated SSH password prompt")
-                child.sendline(password)
-                login_password_sent = True
+                    if sudo_password is None or escalation_password_sent:
+                        return outcome(success=False, reason="unexpected repeated password prompt")
+                    child.sendline(sudo_password)
+                    escalation_password_sent = True
+                else:
+                    child.sendline(password)
+                    login_password_sent = True
             elif matched == 3:
                 if sudo_password is None:
-                    return outcome(success=False, reason="sudo requested a password but none was available")
+                    return outcome(success=False, reason="privilege escalation requested a password but none was available")
                 child.sendline(sudo_password)
             elif matched == 4:
                 return outcome(success=False, reason="authentication rejected")

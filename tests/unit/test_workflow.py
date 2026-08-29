@@ -49,7 +49,7 @@ class WorkflowTests(unittest.TestCase):
             "guard_token": "a" * 32,
             "build_disable_root_login_script": lambda username, token: "disable root login",
             "build_commit_root_login_script": lambda token: "commit root login",
-            "build_root_login_disabled_command": lambda username: "check root login",
+            "build_root_login_disabled_command": lambda username, method: "check root login",
             "prepare_candidate": overrides.get(
                 "prepare_candidate", lambda candidate: {"success": True, "candidate": candidate}
             ),
@@ -63,7 +63,7 @@ class WorkflowTests(unittest.TestCase):
         return result, dependencies
 
     def test_existing_onboarded_sudoer_returns_without_password(self):
-        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
+        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "escalation_available": True, "become_method": "sudo", "can_become": True}
         result, _deps = self.execute([access])
         self.assertFalse(result["changed"])
         self.assertNotIn("password", result["credentials"])
@@ -72,7 +72,7 @@ class WorkflowTests(unittest.TestCase):
     def test_root_login_disable_runs_from_verified_user_and_is_committed_after_reconnect(self):
         workflow = self.config()
         workflow["root"]["disable_after_onboarding"] = True
-        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
+        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "escalation_available": True, "become_method": "sudo", "can_become": True}
         scripts = QueueCallable([{"success": True, "rc": 0}, {"success": True, "rc": 0}])
         check = QueueCallable([{"success": True, "rc": 1}])
         result, _deps = self.execute(
@@ -82,12 +82,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertEqual([call[1]["script"] for call in scripts.calls], ["disable root login", "commit root login"])
         self.assertTrue(all(call[1]["username"] == "automation" for call in scripts.calls))
-        self.assertTrue(all(call[1]["become"] for call in scripts.calls))
+        self.assertTrue(all(call[1]["become_method"] for call in scripts.calls))
 
     def test_failed_reconnect_leaves_guard_uncommitted(self):
         workflow = self.config()
         workflow["root"]["disable_after_onboarding"] = True
-        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
+        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "escalation_available": True, "become_method": "sudo", "can_become": True}
         scripts = QueueCallable([{"success": True, "rc": 0}])
         check = QueueCallable([{"success": True, "rc": 1}])
         result, _deps = self.execute(
@@ -101,16 +101,16 @@ class WorkflowTests(unittest.TestCase):
     def test_existing_root_deny_rule_is_idempotent(self):
         workflow = self.config()
         workflow["root"]["disable_after_onboarding"] = True
-        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
+        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "escalation_available": True, "become_method": "sudo", "can_become": True}
         check = QueueCallable([{"success": True, "rc": 0}])
         result, _deps = self.execute([access], workflow=workflow, run_command=check)
         self.assertTrue(result["success"])
         self.assertFalse(result["changed"])
 
     def test_unprivileged_login_is_skipped_before_root(self):
-        unprivileged = {"success": True, "uid": 1000, "is_root": False, "sudo_available": False, "can_become": False}
-        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": True, "can_become": True}
-        verified = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
+        unprivileged = {"success": True, "uid": 1000, "is_root": False, "sudo_available": False, "escalation_available": False, "become_method": None, "can_become": False}
+        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": True, "escalation_available": True, "become_method": "sudo", "can_become": True}
+        verified = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "escalation_available": True, "become_method": "sudo", "can_become": True}
         result, _deps = self.execute(
             [unprivileged, root, verified],
             detect_platform=QueueCallable([{"success": True, "family": "debian", "package_manager": "apt"}]),
@@ -123,7 +123,7 @@ class WorkflowTests(unittest.TestCase):
     def test_preparation_can_replace_password_after_forced_change(self):
         workflow = self.config()
         workflow["onboarding"] = {"username": None, "password": None, "passwordless_sudo": True}
-        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": True, "can_become": True}
+        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": True, "escalation_available": True, "become_method": "sudo", "can_become": True}
 
         def prepared(candidate):
             return {"success": True, "changed": True, "candidate": {**candidate, "password": "new-secret"}}
@@ -149,12 +149,12 @@ class WorkflowTests(unittest.TestCase):
         workflow = self.config()
         workflow["onboarding"] = {"username": None, "password": None, "passwordless_sudo": True}
         failures = [{"success": False, "reason": "rejected"}, {"success": False, "reason": "rejected"}]
-        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": False, "can_become": True}
+        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": False, "escalation_available": False, "become_method": None, "can_become": True}
         result, _deps = self.execute([*failures, root], workflow=workflow)
         self.assertEqual(result["credentials"]["password"], "factory-secret")
 
     def test_install_sudo_false_returns_privileged_password(self):
-        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": False, "can_become": True}
+        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": False, "escalation_available": False, "become_method": None, "can_become": True}
         result, _deps = self.execute(
             [{"success": False, "reason": "rejected"}, root],
             workflow=self.config(install_sudo=False),
@@ -163,8 +163,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result["credentials"]["password"], "root-secret")
 
     def test_sudo_install_and_provisioning_use_streamed_privileged_scripts(self):
-        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": False, "can_become": True}
-        verified = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
+        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": False, "escalation_available": False, "become_method": None, "can_become": True}
+        verified = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "escalation_available": True, "become_method": "sudo", "can_become": True}
         scripts = QueueCallable([{"success": True, "rc": 0}, {"success": True, "rc": 0}])
         result, _deps = self.execute(
             [{"success": False, "reason": "rejected"}, root, verified],
@@ -174,11 +174,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(len(scripts.calls), 2)
         self.assertEqual(scripts.calls[0][1]["script"], "install sudo")
-        self.assertFalse(scripts.calls[0][1]["become"])
+        self.assertFalse(scripts.calls[0][1]["become_method"])
         self.assertEqual(scripts.calls[1][1]["script"], "provision user")
 
     def test_failed_post_provision_sudo_verification_fails(self):
-        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": True, "can_become": True}
+        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": True, "escalation_available": True, "become_method": "sudo", "can_become": True}
         bad_user = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": False}
         result, _deps = self.execute(
             [{"success": False, "reason": "rejected"}, root, bad_user],

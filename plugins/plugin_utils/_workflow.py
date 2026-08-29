@@ -42,7 +42,7 @@ def _successful_result(
         "credentials": _credentials(candidate, access, include_password),
         "become": {
             "enabled": not access["is_root"] and access["can_become"],
-            "method": "sudo" if not access["is_root"] and access["can_become"] else None,
+            "method": access.get("become_method") if not access["is_root"] and access["can_become"] else None,
             "user": workflow["root"]["username"],
         },
     }
@@ -61,7 +61,9 @@ def _disable_root_login(
     user_connection = _connection(connection_base, user_candidate)
     current = run_command(
         **user_connection,
-        command=build_root_login_disabled_command(workflow["root"]["username"]),
+        command=build_root_login_disabled_command(
+            workflow["root"]["username"], user_access["become_method"]
+        ),
         sudo_password=user_connection["password"],
     )
     if not current.get("success"):
@@ -84,7 +86,7 @@ def _disable_root_login(
         }
     common = {
         **user_connection,
-        "become": True,
+        "become_method": user_access.get("become_method", "sudo"),
         "sudo_password": user_connection["password"],
         "secrets": (user_connection["password"],),
     }
@@ -102,7 +104,7 @@ def _disable_root_login(
     if not verified.get("success") or not verified.get("can_become"):
         return {
             "success": False, "changed": True, "attempts": attempts + 1,
-            "reason": "onboarding user failed SSH or sudo verification after disabling privileged login; rollback is pending",
+            "reason": "onboarding user failed SSH or privilege verification after disabling privileged login; rollback is pending",
         }
 
     committed = run_script(
@@ -183,7 +185,7 @@ def execute_workflow(
             candidate["prepared_changed"] = prepared.get("changed", False)
             privileged = candidate, connection, access
             break
-        failures.append(f"{candidate['username']} authenticated without UID 0 or working sudo")
+        failures.append(f"{candidate['username']} authenticated without UID 0 or working privilege escalation")
 
     if privileged is None:
         return {
@@ -209,7 +211,7 @@ def execute_workflow(
     if not platform.get("success"):
         return {"success": False, "changed": False, "attempts": attempts, "reason": platform["reason"]}
 
-    if not privileged_access["sudo_available"]:
+    if not privileged_access.get("escalation_available", privileged_access["sudo_available"]):
         if not workflow["install_sudo"]:
             return _successful_result(
                 privileged_candidate,
@@ -219,11 +221,18 @@ def execute_workflow(
                 attempts=attempts,
                 force_password=True,
             )
+        if platform["family"] == "openbsd":
+            return {
+                "success": False,
+                "changed": False,
+                "attempts": attempts,
+                "reason": "OpenBSD base-system doas is unavailable",
+            }
         install = sudo_install_command(platform)
         install_result = run_script(
             **privileged_connection,
             script=install,
-            become=not privileged_access["is_root"],
+            become_method=None if privileged_access["is_root"] else privileged_access.get("become_method"),
             sudo_password=None if privileged_access["is_root"] else privileged_connection["password"],
         )
         if not install_result.get("success") or install_result.get("rc") != 0:
@@ -231,7 +240,7 @@ def execute_workflow(
                 "success": False,
                 "changed": False,
                 "attempts": attempts,
-                "reason": install_result.get("reason", "sudo installation failed"),
+                "reason": install_result.get("reason", "privilege escalation installation failed"),
             }
 
     script = build_provision_script(
@@ -240,7 +249,7 @@ def execute_workflow(
     provision = run_script(
         **privileged_connection,
         script=script,
-        become=not privileged_access["is_root"],
+        become_method=None if privileged_access["is_root"] else privileged_access.get("become_method"),
         sudo_password=None if privileged_access["is_root"] else privileged_connection["password"],
         secrets=tuple(
             secret for secret in (onboarding["password"], workflow["root"]["password"]) if secret
@@ -265,7 +274,7 @@ def execute_workflow(
             "success": False,
             "changed": True,
             "attempts": attempts + 1,
-            "reason": "provisioned user failed SSH or sudo verification",
+            "reason": "provisioned user failed SSH or privilege verification",
         }
     if workflow["root"]["disable_after_onboarding"]:
         return _disable_root_login(

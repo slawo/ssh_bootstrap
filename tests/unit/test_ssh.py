@@ -96,7 +96,7 @@ class SshCommandTests(unittest.TestCase):
 
 
     def test_script_and_secrets_are_not_in_process_arguments(self):
-        argv = MODULE.script_argv("node.example", 22, "automation", "yes", True)
+        argv = MODULE.script_argv("node.example", 22, "automation", "yes", "sudo")
         joined = " ".join(argv)
         self.assertNotIn("user-secret", joined)
         self.assertNotIn("useradd automation", joined)
@@ -105,11 +105,16 @@ class SshCommandTests(unittest.TestCase):
     def test_script_is_streamed_after_login_and_sudo(self):
         child = FakeChild([(2, "", ""), (3, "", ""), (0, "", ""), (1, "provisioned", "0")])
         with patch.object(MODULE.pexpect, "spawn", return_value=child):
-            result = MODULE.run_script(host="node.example", port=22, username="automation", password="login-secret", sudo_password="sudo-secret", host_key_checking="yes", script="useradd automation", timeout=5, become=True)
+            result = MODULE.run_script(host="node.example", port=22, username="automation", password="login-secret", sudo_password="sudo-secret", host_key_checking="yes", script="useradd automation", timeout=5, become_method="sudo")
         self.assertTrue(result["success"])
         self.assertEqual(child.sent[:2], ["login-secret", "sudo-secret"])
         self.assertIn("useradd automation", child.sent[2])
         self.assertEqual(child.controls, ["d"])
+
+    def test_doas_wraps_streamed_script_without_sudo(self):
+        argv = MODULE.script_argv("node.example", 22, "automation", "yes", "doas")
+        self.assertIn("doas", argv)
+        self.assertNotIn("sudo", argv)
 
     def test_streamed_secrets_are_redacted(self):
         child = FakeChild([(2, "", ""), (0, "", ""), (1, "user-secret root-secret", "0")])

@@ -19,8 +19,8 @@ def _validated(root_username: str, guard_token: str) -> tuple[str, str]:
     return shlex.quote(root_username), guard_token
 
 
-def build_root_login_disabled_command(root_username: str) -> str:
-    """Return a sudo command that checks the exact managed SSH deny rule."""
+def build_root_login_disabled_command(root_username: str, become_method: str) -> str:
+    """Return an elevated command that checks the exact managed SSH deny rule."""
     if not _SAFE_ACCOUNT.fullmatch(root_username):
         raise ValueError("root username contains unsupported characters")
     expected = shlex.quote(f"DenyUsers {root_username}")
@@ -30,7 +30,13 @@ def build_root_login_disabled_command(root_username: str) -> str:
         "grep -Eq '^[[:space:]]*Include[[:space:]]+"
         "/etc/ssh/sshd_config\\.d/\\*\\.conf([[:space:]]|$)' /etc/ssh/sshd_config"
     )
-    return f"sudo -S -p '{SUDO_PROMPT}' -- sh -c {shlex.quote(check)}"
+    if become_method == "sudo":
+        prefix = f"sudo -S -p '{SUDO_PROMPT}' --"
+    elif become_method == "doas":
+        prefix = "doas"
+    else:
+        raise ValueError(f"unsupported become method: {become_method}")
+    return f"{prefix} sh -c {shlex.quote(check)}"
 
 
 def build_disable_root_login_script(root_username: str, guard_token: str) -> str:

@@ -37,6 +37,16 @@ class ProvisionTests(unittest.TestCase):
         self.assertIn("useradd -m -s /bin/ksh", script)
         self.assertIn("chpass -p", script)
         self.assertIn("encrypt user-secret", script)
+        self.assertIn("permit nopass automation as root", script)
+        self.assertIn("doas -C", script)
+        self.assertNotIn("sudoers", script)
+        self.assertNotIn("visudo", script)
+
+    def test_openbsd_password_required_doas_policy(self):
+        config = self.config(passwordless=False)
+        script = MODULE.build_provision_script(family="openbsd", **config)
+        self.assertIn("permit automation as root", script)
+        self.assertNotIn("permit nopass", script)
 
     def test_passwordless_sudo_is_default_policy(self):
         config = self.config(passwordless=True)
