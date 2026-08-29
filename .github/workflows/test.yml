@@ -239,12 +239,14 @@ jobs:
           release: "7.9"
           copyback: false
           prepare: |
+            export PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/bin
             pkg_add ansible-core py3-pexpect sudo
             useradd -m -s /bin/ksh -p "$(encrypt integration-secret)" bootstrap
             echo 'bootstrap ALL=(ALL) ALL' >> /etc/sudoers
             /usr/local/sbin/visudo -c
             /usr/sbin/sshd -f tests/integration/fixtures/openbsd/sshd_config
           run: |
+            export PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/bin
             ansible-galaxy collection build --output-path dist --force
             ansible-galaxy collection install --force dist/slawo-ssh_bootstrap-*.tar.gz
             ansible-playbook tests/integration/platform.yml
