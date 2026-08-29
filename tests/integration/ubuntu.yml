@@ -11,11 +11,13 @@
       slawo.ssh_bootstrap.discover_credentials:
         host: 127.0.0.1
         port: 22224
+        root:
+          username: ubuntu
+          password: "{{ onboarding_password }}"
         credentials:
           - username: ubuntu
             password: "{{ ubuntu_initial_password }}"
-        onboarding:
-          password: "{{ onboarding_password }}"
+        return_password: true
         host_key_checking: accept-new
         timeout: 10
       register: discovery
@@ -25,8 +27,12 @@
       ansible.builtin.assert:
         that:
           - discovery.changed
-          - discovery.attempts == 1
+          - discovery.attempts == 2
           - discovery.credentials.username == 'ubuntu'
           - discovery.credentials.password == onboarding_password
-          - not discovery.onboarding_cancelled
+          - discovery.credentials.uid | int > 0
+          - not discovery.credentials.is_root
+          - discovery.become.enabled
+          - discovery.become.method == 'sudo'
+          - discovery.become.user == 'ubuntu'
       no_log: true

@@ -4,7 +4,6 @@
   connection: local
   gather_facts: false
   vars:
-    armbian_initial_password: '1234'
     root_password: integration-root-secret
     user_password: integration-user-secret
   tasks:
@@ -12,15 +11,15 @@
       slawo.ssh_bootstrap.discover_credentials:
         host: 127.0.0.1
         port: 22223
-        credentials:
-          - username: root
-            password: rejected-secret
-          - username: root
-            password: "{{ armbian_initial_password }}"
+        credential_profiles:
+          - armbian
         onboarding:
           username: automation
+          password: "{{ user_password }}"
+          passwordless_sudo: true
+        root:
           password: "{{ root_password }}"
-          user_password: "{{ user_password }}"
+        return_password: true
         host_key_checking: accept-new
         timeout: 5
       register: discovery
@@ -30,10 +29,14 @@
       ansible.builtin.assert:
         that:
           - discovery.changed
-          - discovery.attempts == 2
+          - discovery.attempts == 4
           - discovery.credentials.username == 'automation'
           - discovery.credentials.password == user_password
-          - not discovery.onboarding_cancelled
+          - discovery.credentials.uid | int > 0
+          - not discovery.credentials.is_root
+          - discovery.become.enabled
+          - discovery.become.method == 'sudo'
+          - discovery.become.user == 'root'
       no_log: true
 
     - name: Verify the changed root password can log in
