@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   release-please:
-    if: github.repository == 'slawo/ansible-ssh-bootstrap'
+    if: github.repository == 'slawo/ssh_bootstrap'
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}

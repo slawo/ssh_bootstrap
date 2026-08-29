@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   build:
-    if: github.repository == 'slawo/ansible-ssh-bootstrap'
+    if: github.repository == 'slawo/ssh_bootstrap'
     runs-on: ubuntu-latest
 
     steps:

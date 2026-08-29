@@ -11,6 +11,6 @@ tags:
   - ssh
   - bootstrap
   - infrastructure
-repository: https://github.com/slawo/ansible-ssh-bootstrap
+repository: https://github.com/slawo/ssh_bootstrap
 build_ignore:
   - tests

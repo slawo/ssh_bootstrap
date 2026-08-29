@@ -39,7 +39,7 @@
   ],
   "packages": {
     ".": {
-      "component": "ssh-bootstrap",
+      "component": "ssh_bootstrap",
       "extra-files": [
         {
           "type": "yaml",
