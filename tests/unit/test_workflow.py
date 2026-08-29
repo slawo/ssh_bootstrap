@@ -49,6 +49,7 @@ class WorkflowTests(unittest.TestCase):
             "guard_token": "a" * 32,
             "build_disable_root_login_script": lambda username, token: "disable root login",
             "build_commit_root_login_script": lambda token: "commit root login",
+            "build_root_login_disabled_command": lambda username: "check root login",
             "prepare_candidate": overrides.get(
                 "prepare_candidate", lambda candidate: {"success": True, "candidate": candidate}
             ),
@@ -73,7 +74,10 @@ class WorkflowTests(unittest.TestCase):
         workflow["root"]["disable_after_onboarding"] = True
         access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
         scripts = QueueCallable([{"success": True, "rc": 0}, {"success": True, "rc": 0}])
-        result, _deps = self.execute([access, access], workflow=workflow, run_script=scripts)
+        check = QueueCallable([{"success": True, "rc": 1}])
+        result, _deps = self.execute(
+            [access, access], workflow=workflow, run_script=scripts, run_command=check
+        )
         self.assertTrue(result["success"])
         self.assertTrue(result["changed"])
         self.assertEqual([call[1]["script"] for call in scripts.calls], ["disable root login", "commit root login"])
@@ -85,12 +89,23 @@ class WorkflowTests(unittest.TestCase):
         workflow["root"]["disable_after_onboarding"] = True
         access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
         scripts = QueueCallable([{"success": True, "rc": 0}])
+        check = QueueCallable([{"success": True, "rc": 1}])
         result, _deps = self.execute(
-            [access, {"success": False, "reason": "rejected"}], workflow=workflow, run_script=scripts
+            [access, {"success": False, "reason": "rejected"}], workflow=workflow,
+            run_script=scripts, run_command=check
         )
         self.assertFalse(result["success"])
         self.assertIn("rollback is pending", result["reason"])
         self.assertEqual(len(scripts.calls), 1)
+
+    def test_existing_root_deny_rule_is_idempotent(self):
+        workflow = self.config()
+        workflow["root"]["disable_after_onboarding"] = True
+        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
+        check = QueueCallable([{"success": True, "rc": 0}])
+        result, _deps = self.execute([access], workflow=workflow, run_command=check)
+        self.assertTrue(result["success"])
+        self.assertFalse(result["changed"])
 
     def test_unprivileged_login_is_skipped_before_root(self):
         unprivileged = {"success": True, "uid": 1000, "is_root": False, "sudo_available": False, "can_become": False}

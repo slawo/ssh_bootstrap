@@ -72,6 +72,7 @@ vault_bootstrap_credentials:
 | Option | Required | Default | Description |
 |---|---:|---|---|
 | `credentials` | no | `[]` | Ordered fallback list of username/password dictionaries. |
+| `credential_profiles` | no | `[]` | Opt-in profiles appended after explicit credentials: `armbian`, `ubuntu_raspberry_pi`, or `raspberry_pi_os_legacy`. |
 | `host` | no | inventory host | Target hostname or address. |
 | `port` | no | inventory port or `22` | SSH port. |
 | `timeout` | no | `10` | Seconds to wait for each prompt. |
@@ -89,6 +90,8 @@ vault_bootstrap_credentials:
 | `debug` | no | `false` | Return sanitized per-attempt SSH sessions in `sessions`. |
 
 Any non-username prompt ending in `name:` receives an empty response and do not affect the configured username. Pattern keys are `login_password`, `current_password`, `new_password`, `repeat_password`, `new_username`, `ignored_name`, `permission_denied`, `host_key_error`, and `success`.
+
+Credential profiles are never enabled automatically. Current Armbian documents `root` / `1234`, and Ubuntu documents `ubuntu` / `ubuntu` for Raspberry Pi server images when Imager customization is skipped. Raspberry Pi OS removed its default `pi` account in 2022, so `pi` / `raspberry` is available only through the explicitly named legacy profile. Sources: [Armbian first login](https://docs.armbian.com/getting-started/first-boot-and-login/), [Ubuntu on Raspberry Pi](https://ubuntu.com/hardware/docs/boards/tutorials/raspberry-pi-solo/), and [Raspberry Pi OS credential removal](https://www.raspberrypi.com/news/raspberry-pi-bullseye-update-april-2022/).
 
 ## Result and safety
 

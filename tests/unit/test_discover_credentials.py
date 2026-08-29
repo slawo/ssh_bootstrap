@@ -80,6 +80,23 @@ class DiscoverCredentialsTests(unittest.TestCase):
         self.assertEqual([candidate["source"] for candidate in candidates], ["onboarding", "root", "credentials"])
         self.assertEqual(candidates[-1]["username"], "factory")
 
+    def test_profiles_follow_explicit_fallbacks_and_are_deduplicated(self):
+        workflow = MODULE._validated_workflow({})
+        candidates = MODULE._ordered_candidates(
+            workflow,
+            [{"username": "root", "password": "1234"}],
+            MODULE.credentials_for_profiles(["armbian", "ubuntu_raspberry_pi"]),
+        )
+        self.assertEqual(
+            [(candidate["username"], candidate["source"]) for candidate in candidates],
+            [("root", "credentials"), ("ubuntu", "profile")],
+        )
+
+    def test_profile_validation_is_fail_closed(self):
+        self.assertEqual(MODULE._validated_profiles(None), [])
+        with self.assertRaisesRegex(Exception, "unknown credential profiles"):
+            MODULE._validated_profiles(["unknown"])
+
     def test_root_login_false_removes_root_from_fallbacks(self):
         workflow = MODULE._validated_workflow({"root": {"username": "toor", "login": False}})
         candidates = MODULE._ordered_candidates(
@@ -93,6 +110,22 @@ class DiscoverCredentialsTests(unittest.TestCase):
             candidates,
             [{"username": "operator", "password": "operator-secret", "source": "credentials"}],
         )
+
+    def test_forced_password_policy_uses_only_matching_account_password(self):
+        workflow = MODULE._validated_workflow(
+            {
+                "onboarding": {"username": "automation", "password": "user-secret"},
+                "root": {"username": "toor", "password": "root-secret"},
+            }
+        )
+        root_prompt = MODULE._prompt_onboarding({"username": "toor"}, workflow)
+        user_prompt = MODULE._prompt_onboarding({"username": "automation"}, workflow)
+        unknown_prompt = MODULE._prompt_onboarding({"username": "factory"}, workflow)
+        self.assertEqual(root_prompt["password"], "root-secret")
+        self.assertEqual(user_prompt["password"], "user-secret")
+        self.assertIsNone(unknown_prompt["password"])
+        self.assertEqual(unknown_prompt["username"], "automation")
+        self.assertEqual(unknown_prompt["user_password"], "user-secret")
 
     def run_action(self, args, workflow_result=None, check_mode=False):
         action = MODULE.ActionModule.__new__(MODULE.ActionModule)

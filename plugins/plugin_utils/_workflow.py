@@ -30,7 +30,11 @@ def _successful_result(
     attempts: int,
     force_password: bool = False,
 ) -> dict[str, Any]:
-    include_password = force_password or workflow["return_password"] or candidate["source"] == "credentials"
+    include_password = (
+        force_password
+        or workflow["return_password"]
+        or candidate["source"] in {"credentials", "profile"}
+    )
     result = {
         "success": True,
         "changed": changed,
@@ -47,12 +51,37 @@ def _successful_result(
 
 def _disable_root_login(
     *, workflow: dict[str, Any], user_candidate: dict[str, Any], connection_base: dict[str, Any],
+    user_access: dict[str, Any],
     run_script: Callable[..., dict[str, Any]], probe_access: Callable[..., dict[str, Any]],
     run_command: Callable[..., dict[str, Any]],
     guard_token: str, build_disable_root_login_script: Callable[..., str],
-    build_commit_root_login_script: Callable[..., str], attempts: int,
+    build_commit_root_login_script: Callable[..., str],
+    build_root_login_disabled_command: Callable[..., str], attempts: int,
 ) -> dict[str, Any]:
     user_connection = _connection(connection_base, user_candidate)
+    current = run_command(
+        **user_connection,
+        command=build_root_login_disabled_command(workflow["root"]["username"]),
+        sudo_password=user_connection["password"],
+    )
+    if not current.get("success"):
+        return {
+            "success": False,
+            "changed": False,
+            "attempts": attempts,
+            "reason": current.get("reason", "failed to inspect privileged SSH login policy"),
+        }
+    if current.get("rc") == 0:
+        return _successful_result(
+            user_candidate, user_access, workflow, changed=False, attempts=attempts
+        )
+    if current.get("rc") != 1:
+        return {
+            "success": False,
+            "changed": False,
+            "attempts": attempts,
+            "reason": "privileged SSH login policy inspection returned an unexpected status",
+        }
     common = {
         **user_connection,
         "become": True,
@@ -104,6 +133,7 @@ def execute_workflow(
     guard_token: str,
     build_disable_root_login_script: Callable[..., str],
     build_commit_root_login_script: Callable[..., str],
+    build_root_login_disabled_command: Callable[..., str],
     prepare_candidate: Callable[[dict[str, Any]], dict[str, Any]],
 ) -> dict[str, Any]:
     privileged: tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
@@ -134,10 +164,12 @@ def execute_workflow(
             if workflow["root"]["disable_after_onboarding"]:
                 return _disable_root_login(
                     workflow=workflow, user_candidate=candidate, connection_base=connection_base,
+                    user_access=access,
                     run_script=run_script, probe_access=probe_access,
                     run_command=run_command, guard_token=guard_token,
                     build_disable_root_login_script=build_disable_root_login_script,
                     build_commit_root_login_script=build_commit_root_login_script,
+                    build_root_login_disabled_command=build_root_login_disabled_command,
                     attempts=attempts,
                 )
             return _successful_result(
@@ -238,10 +270,12 @@ def execute_workflow(
     if workflow["root"]["disable_after_onboarding"]:
         return _disable_root_login(
             workflow=workflow, user_candidate=user_candidate, connection_base=connection_base,
+            user_access=user_access,
             run_script=run_script, probe_access=probe_access,
             run_command=run_command, guard_token=guard_token,
             build_disable_root_login_script=build_disable_root_login_script,
             build_commit_root_login_script=build_commit_root_login_script,
+            build_root_login_disabled_command=build_root_login_disabled_command,
             attempts=attempts + 1,
         )
     return _successful_result(

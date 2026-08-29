@@ -14,6 +14,13 @@ SPEC.loader.exec_module(MODULE)
 
 
 class RootLoginTests(unittest.TestCase):
+    def test_policy_check_uses_sudo_and_exact_managed_rule(self):
+        command = MODULE.build_root_login_disabled_command("toor")
+        self.assertIn("sudo -S", command)
+        self.assertIn(MODULE.SUDO_PROMPT, command)
+        self.assertIn("00-ansible-ssh-bootstrap.conf", command)
+        self.assertIn("DenyUsers toor", command)
+
     def test_disable_script_has_validation_reload_and_timed_rollback(self):
         script = MODULE.build_disable_root_login_script("toor", "a" * 32)
         self.assertIn("DenyUsers %s", script)

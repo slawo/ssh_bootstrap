@@ -14,6 +14,10 @@ from ansible.plugins.action import ActionBase
 
 try:
     from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._access import probe_access
+    from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._credentials import (
+        PROFILES,
+        credentials_for_profiles,
+    )
     from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._platform import (
         detect_platform,
         sudo_install_command,
@@ -24,6 +28,7 @@ try:
     from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._root_login import (
         build_commit_root_login_script,
         build_disable_root_login_script,
+        build_root_login_disabled_command,
     )
     from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._ssh import (
         run_command,
@@ -34,9 +39,14 @@ try:
     )
 except ImportError:  # pragma: no cover - permits direct source-tree unit tests
     from plugins.plugin_utils._access import probe_access
+    from plugins.plugin_utils._credentials import PROFILES, credentials_for_profiles
     from plugins.plugin_utils._platform import detect_platform, sudo_install_command
     from plugins.plugin_utils._provision import build_provision_script
-    from plugins.plugin_utils._root_login import build_commit_root_login_script, build_disable_root_login_script
+    from plugins.plugin_utils._root_login import (
+        build_commit_root_login_script,
+        build_disable_root_login_script,
+        build_root_login_disabled_command,
+    )
     from plugins.plugin_utils._ssh import run_command, run_script
     from plugins.plugin_utils._workflow import execute_workflow
 
@@ -151,7 +161,22 @@ def _validated_workflow(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ordered_candidates(workflow: dict[str, Any], credentials: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _validated_profiles(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(not isinstance(name, str) for name in value):
+        raise AnsibleActionFail("credential_profiles must be a list of profile names")
+    unknown = set(value) - set(PROFILES)
+    if unknown:
+        raise AnsibleActionFail(f"unknown credential profiles: {', '.join(sorted(unknown))}")
+    return value
+
+
+def _ordered_candidates(
+    workflow: dict[str, Any],
+    credentials: list[dict[str, str]],
+    profile_credentials: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     onboarding = workflow["onboarding"]
     root = workflow["root"]
@@ -166,6 +191,11 @@ def _ordered_candidates(workflow: dict[str, Any], credentials: list[dict[str, st
         for candidate in credentials
         if root["login"] or candidate["username"] != root["username"]
     )
+    candidates.extend(
+        candidate
+        for candidate in (profile_credentials or [])
+        if root["login"] or candidate["username"] != root["username"]
+    )
 
     unique = []
     seen = set()
@@ -175,6 +205,24 @@ def _ordered_candidates(workflow: dict[str, Any], credentials: list[dict[str, st
             unique.append(candidate)
             seen.add(key)
     return unique
+
+
+def _prompt_onboarding(candidate: dict[str, Any], workflow: dict[str, Any]) -> dict[str, Any]:
+    """Choose prompt answers without changing an unrelated fallback account."""
+    username = candidate["username"]
+    onboarding = workflow["onboarding"]
+    root = workflow["root"]
+    if username == root["username"]:
+        account_password = root["password"]
+    elif username == onboarding["username"]:
+        account_password = onboarding["password"]
+    else:
+        account_password = None
+    return {
+        "username": onboarding["username"],
+        "user_password": onboarding["password"],
+        "password": account_password,
+    }
 
 def _ssh_command(host: str, port: int, username: str, host_key_checking: str) -> list[str]:
     return [
@@ -372,6 +420,7 @@ class ActionModule(ActionBase):
             raise AnsibleActionFail("host must be provided or resolvable from inventory")
 
         credentials = _validated_credentials(args.get("credentials"))
+        profiles = _validated_profiles(args.get("credential_profiles"))
         workflow = _validated_workflow(args)
         port = args.get("port", task_vars.get("ansible_port", 22))
         timeout = args.get("timeout", 10)
@@ -404,22 +453,14 @@ class ActionModule(ActionBase):
             result.update(changed=False, skipped=True, msg="credential discovery is not performed in check mode")
             return result
 
-        candidates = _ordered_candidates(workflow, credentials)
+        candidates = _ordered_candidates(workflow, credentials, credentials_for_profiles(profiles))
         if not candidates:
             raise AnsibleActionFail("no SSH credential candidates were provided")
 
         debug_sessions = []
 
         def prepare_candidate(candidate):
-            prompt_values = {
-                "username": workflow["onboarding"]["username"],
-                "user_password": workflow["onboarding"]["password"],
-                "password": (
-                    workflow["root"]["password"]
-                    if candidate["username"] == workflow["root"]["username"]
-                    else workflow["onboarding"]["password"]
-                ),
-            }
+            prompt_values = _prompt_onboarding(candidate, workflow)
             attempt = _attempt(
                 _ssh_command(host, port, candidate["username"], host_key_checking),
                 candidate,
@@ -467,6 +508,7 @@ class ActionModule(ActionBase):
             guard_token=uuid.uuid4().hex,
             build_disable_root_login_script=build_disable_root_login_script,
             build_commit_root_login_script=build_commit_root_login_script,
+            build_root_login_disabled_command=build_root_login_disabled_command,
             prepare_candidate=prepare_candidate,
         )
         success = workflow_result.pop("success")

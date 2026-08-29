@@ -8,6 +8,7 @@ import shlex
 
 _SAFE_ACCOUNT = re.compile(r"^[a-z_][a-z0-9_.-]*[$]?$", re.ASCII)
 _SAFE_TOKEN = re.compile(r"^[a-f0-9]{32}$", re.ASCII)
+SUDO_PROMPT = "__ANSIBLE_SSH_BOOTSTRAP_SUDO_PASSWORD__"
 
 
 def _validated(root_username: str, guard_token: str) -> tuple[str, str]:
@@ -16,6 +17,20 @@ def _validated(root_username: str, guard_token: str) -> tuple[str, str]:
     if not _SAFE_TOKEN.fullmatch(guard_token):
         raise ValueError("root-login guard token must be 32 lowercase hexadecimal characters")
     return shlex.quote(root_username), guard_token
+
+
+def build_root_login_disabled_command(root_username: str) -> str:
+    """Return a sudo command that checks the exact managed SSH deny rule."""
+    if not _SAFE_ACCOUNT.fullmatch(root_username):
+        raise ValueError("root username contains unsupported characters")
+    expected = shlex.quote(f"DenyUsers {root_username}")
+    check = (
+        "test -f /etc/ssh/sshd_config.d/00-ansible-ssh-bootstrap.conf && "
+        f"test \"$(cat /etc/ssh/sshd_config.d/00-ansible-ssh-bootstrap.conf)\" = {expected} && "
+        "grep -Eq '^[[:space:]]*Include[[:space:]]+"
+        "/etc/ssh/sshd_config\\.d/\\*\\.conf([[:space:]]|$)' /etc/ssh/sshd_config"
+    )
+    return f"sudo -S -p '{SUDO_PROMPT}' -- sh -c {shlex.quote(check)}"
 
 
 def build_disable_root_login_script(root_username: str, guard_token: str) -> str:

@@ -36,6 +36,14 @@ options:
         description: SSH account password.
         type: str
         required: true
+  credential_profiles:
+    description:
+      - Opt-in vendor credential profiles appended after O(credentials).
+      - Modern Raspberry Pi OS has no default credentials; its historical profile is explicitly marked legacy.
+    type: list
+    elements: str
+    choices: [armbian, ubuntu_raspberry_pi, raspberry_pi_os_legacy]
+    default: []
   onboarding:
     description: The single desired automation account.
     type: dict
