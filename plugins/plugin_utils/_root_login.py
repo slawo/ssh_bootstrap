@@ -28,8 +28,52 @@ config=/etc/ssh/sshd_config
 dropin=/etc/ssh/sshd_config.d/00-ansible-ssh-bootstrap.conf
 test -f "$config"
 mkdir -p /etc/ssh/sshd_config.d "$state"
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet sshd.service; then
+    printf '%s\\n' systemd-sshd > "$state/reload_kind"
+elif command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet ssh.service; then
+    printf '%s\\n' systemd-ssh > "$state/reload_kind"
+elif command -v rcctl >/dev/null 2>&1 && rcctl check sshd >/dev/null 2>&1; then
+    printf '%s\\n' rcctl-sshd > "$state/reload_kind"
+elif command -v service >/dev/null 2>&1 && service sshd status >/dev/null 2>&1; then
+    printf '%s\\n' service-sshd > "$state/reload_kind"
+elif command -v service >/dev/null 2>&1 && service ssh status >/dev/null 2>&1; then
+    printf '%s\\n' service-ssh > "$state/reload_kind"
+else
+    printf '%s\\n' 'unable to identify the active SSH service' >&2
+    exit 1
+fi
+cat > "$state/reload_sshd" <<'RELOAD_SSHD'
+#!/bin/sh
+set -eu
+case "$(cat "$1")" in
+    systemd-sshd) exec systemctl reload sshd.service ;;
+    systemd-ssh) exec systemctl reload ssh.service ;;
+    rcctl-sshd) exec rcctl reload sshd ;;
+    service-sshd) exec service sshd reload ;;
+    service-ssh) exec service ssh reload ;;
+    *) printf '%s\\n' 'invalid saved SSH reload mechanism' >&2; exit 1 ;;
+esac
+RELOAD_SSHD
+chmod 0700 "$state/reload_sshd"
 cp -p "$config" "$state/sshd_config"
 if test -f "$dropin"; then cp -p "$dropin" "$state/dropin"; else : > "$state/no_dropin"; fi
+cat > "$state/rollback" <<'ROLLBACK'
+#!/bin/sh
+set -eu
+state=$1
+if ! test -f "$state/commit"; then
+    cp -p "$state/sshd_config" /etc/ssh/sshd_config
+    if test -f "$state/no_dropin"; then
+        rm -f /etc/ssh/sshd_config.d/00-ansible-ssh-bootstrap.conf
+    else
+        cp -p "$state/dropin" /etc/ssh/sshd_config.d/00-ansible-ssh-bootstrap.conf
+    fi
+    sshd -t
+    "$state/reload_sshd" "$state/reload_kind"
+fi
+ROLLBACK
+chmod 0700 "$state/rollback"
+nohup sh -c 'sleep 60; exec "$1/rollback" "$1"' guard "$state" >/dev/null 2>&1 &
 if ! grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\\.d/\\*\\.conf([[:space:]]|$)' "$config"; then
     temporary="$state/sshd_config.new"
     printf '%s\\n' 'Include /etc/ssh/sshd_config.d/*.conf' > "$temporary"
@@ -37,10 +81,8 @@ if ! grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\\.d/\\*\\.co
     cat "$temporary" > "$config"
 fi
 printf 'DenyUsers %s\\n' {account} > "$dropin"
-rollback='if ! test -f "$1/commit"; then cp -p "$1/sshd_config" /etc/ssh/sshd_config; if test -f "$1/no_dropin"; then rm -f /etc/ssh/sshd_config.d/00-ansible-ssh-bootstrap.conf; else cp -p "$1/dropin" /etc/ssh/sshd_config.d/00-ansible-ssh-bootstrap.conf; fi; sshd -t && (systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || service sshd reload 2>/dev/null || service ssh reload 2>/dev/null || rcctl reload sshd); fi'
-nohup sh -c 'sleep 60; sh -c "$1" guard "$2"' guard "$rollback" "$state" >/dev/null 2>&1 &
 sshd -t
-systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || service sshd reload 2>/dev/null || service ssh reload 2>/dev/null || rcctl reload sshd
+"$state/reload_sshd" "$state/reload_kind"
 """
 
 

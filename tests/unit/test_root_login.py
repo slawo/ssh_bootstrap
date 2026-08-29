@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import importlib.util
+import subprocess
 import unittest
 
 
@@ -19,8 +20,44 @@ class RootLoginTests(unittest.TestCase):
         self.assertIn(" toor >", script)
         self.assertIn("sshd -t", script)
         self.assertIn("sleep 60", script)
-        self.assertIn('if ! test -f "$1/commit"', script)
-        self.assertIn("rcctl reload sshd", script)
+        self.assertIn('if ! test -f "$state/commit"', script)
+        self.assertIn('"$state/reload_sshd" "$state/reload_kind"', script)
+
+    def test_reload_mechanism_is_selected_once_and_reused_by_rollback(self):
+        script = MODULE.build_disable_root_login_script("root", "c" * 32)
+        self.assertIn("systemctl is-active --quiet sshd.service", script)
+        self.assertIn("systemctl is-active --quiet ssh.service", script)
+        self.assertIn("rcctl check sshd", script)
+        self.assertIn("service sshd status", script)
+        self.assertIn("service ssh status", script)
+        self.assertIn('case "$(cat "$1")"', script)
+        self.assertNotIn("systemctl reload sshd 2>/dev/null ||", script)
+
+    def test_unknown_reload_mechanism_fails_before_configuration_change(self):
+        script = MODULE.build_disable_root_login_script("root", "d" * 32)
+        detection = script.index("unable to identify the active SSH service")
+        backup = script.index('cp -p "$config"')
+        deny = script.index("DenyUsers")
+        self.assertLess(detection, backup)
+        self.assertLess(detection, deny)
+
+    def test_watchdog_is_armed_before_configuration_mutation(self):
+        script = MODULE.build_disable_root_login_script("root", "e" * 32)
+        watchdog = script.index("nohup sh -c 'sleep 60")
+        include_write = script.index("cat \"$temporary\" > \"$config\"")
+        deny_write = script.index("DenyUsers")
+        self.assertLess(watchdog, include_write)
+        self.assertLess(watchdog, deny_write)
+
+    def test_generated_scripts_have_valid_posix_shell_syntax(self):
+        for script in (
+            MODULE.build_disable_root_login_script("root", "f" * 32),
+            MODULE.build_commit_root_login_script("0" * 32),
+        ):
+            checked = subprocess.run(
+                ["sh", "-n"], input=script, text=True, capture_output=True, check=False
+            )
+            self.assertEqual(checked.returncode, 0, checked.stderr)
 
     def test_commit_script_marks_guard_before_deferred_cleanup(self):
         script = MODULE.build_commit_root_login_script("b" * 32)

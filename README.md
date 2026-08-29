@@ -97,7 +97,7 @@ The result provides `credentials` (`username`, `uid`, `is_root`, and conditional
 - Pre-populate `known_hosts` where possible. Use `accept-new` only on controlled provisioning networks.
 - Probing can trigger account lockout; keep candidate lists short and ordered.
 - Vendor prompts vary; test regex overrides on an isolated target.
-- Privileged SSH disabling is applied from the verified onboarding user's sudo session. A watchdog restores the previous configuration after 60 seconds unless reconnect and sudo-to-UID0 verification succeed.
+- Privileged SSH disabling is applied from the verified onboarding user's sudo session. The active SSH service and its reload mechanism are selected before any configuration change. A watchdog restores the previous configuration after 60 seconds unless a new SSH connection and sudo-to-UID0 verification succeed.
 - Check mode skips probing because authentication and onboarding can affect security state.
 
 ## Validation
