@@ -28,8 +28,3 @@ to prevent VM logs, session captures, and credentials from being committed.
 The OpenBSD VM job caches the immutable post-`prepare` image. Set the repository
 variable `DEBUG_ON_ERROR=true` to make vmactions pause a failed VM and expose its
 interactive VNC debugging link. Leave it unset for normal unattended CI.
-
-The `Development container` CI job builds the complete configuration, including
-features, and runs its toolchain smoke test. A local rebuild should produce the
-same result from VS Code's **Dev Containers: Rebuild Container Without Cache**
-command if a cached APT layer is unhealthy.

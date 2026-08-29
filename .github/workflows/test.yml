@@ -10,36 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  devcontainer:
-    name: Development container
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Build development container base
-        run: |
-          set +e
-          docker build --progress=plain --tag ssh-bootstrap-dev-base --file .devcontainer/Dockerfile . 2>&1 | tee "${RUNNER_TEMP}/devcontainer-base.log"
-          status=${PIPESTATUS[0]}
-          set -e
-          if [ "${status}" -ne 0 ]; then
-            message=$(tail -n 100 "${RUNNER_TEMP}/devcontainer-base.log" | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
-            echo "::error title=Development container base build failed::${message}"
-            exit "${status}"
-          fi
-
-      - name: Build and smoke-test development container
-        uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3
-        with:
-          push: never
-          runCmd: >-
-            python3 -m unittest discover -s tests/unit -v
-            && ansible-lint .
-            && docker version
-            && docker compose version
-            && gh --version
-
   collection:
     name: ansible-core ${{ matrix.ansible_core }}
     runs-on: ubuntu-latest
