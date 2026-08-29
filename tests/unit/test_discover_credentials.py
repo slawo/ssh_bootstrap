@@ -79,6 +79,20 @@ class DiscoverCredentialsTests(unittest.TestCase):
         self.assertEqual([candidate["source"] for candidate in candidates], ["onboarding", "root", "credentials"])
         self.assertEqual(candidates[-1]["username"], "factory")
 
+    def test_root_login_false_removes_root_from_fallbacks(self):
+        workflow = MODULE._validated_workflow({"root": {"username": "toor", "login": False}})
+        candidates = MODULE._ordered_candidates(
+            workflow,
+            [
+                {"username": "toor", "password": "factory-secret"},
+                {"username": "operator", "password": "operator-secret"},
+            ],
+        )
+        self.assertEqual(
+            candidates,
+            [{"username": "operator", "password": "operator-secret", "source": "credentials"}],
+        )
+
     def run_attempt(self, matches, onboarding=None, debug=False):
         child = FakeChild(matches)
         with patch.object(MODULE.pexpect, "spawn", return_value=child):

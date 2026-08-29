@@ -132,7 +132,11 @@ def _ordered_candidates(workflow: dict[str, Any], credentials: list[dict[str, st
         )
     if root["login"] and root["password"] is not None:
         candidates.append({"username": root["username"], "password": root["password"], "source": "root"})
-    candidates.extend({**candidate, "source": "credentials"} for candidate in credentials)
+    candidates.extend(
+        {**candidate, "source": "credentials"}
+        for candidate in credentials
+        if root["login"] or candidate["username"] != root["username"]
+    )
 
     unique = []
     seen = set()
