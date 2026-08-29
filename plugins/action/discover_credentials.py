@@ -38,8 +38,10 @@ DEFAULT_PROMPTS = {
 
 
 def _validated_credentials(value: Any) -> list[dict[str, str]]:
-    if not isinstance(value, list) or not value:
-        raise AnsibleActionFail("credentials must be a non-empty list")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise AnsibleActionFail("credentials must be a list")
 
     result = []
     for index, candidate in enumerate(value):
@@ -54,6 +56,92 @@ def _validated_credentials(value: Any) -> list[dict[str, str]]:
         result.append({"username": username, "password": password})
     return result
 
+
+
+def _validated_workflow(args: dict[str, Any]) -> dict[str, Any]:
+    onboarding = args.get("onboarding", {})
+    if not isinstance(onboarding, dict):
+        raise AnsibleActionFail("onboarding must be a dictionary")
+    unknown_onboarding = set(onboarding) - {"username", "password", "passwordless_sudo"}
+    if unknown_onboarding:
+        raise AnsibleActionFail(f"unknown onboarding options: {', '.join(sorted(unknown_onboarding))}")
+    onboarding_username = onboarding.get("username")
+    onboarding_password = onboarding.get("password")
+    if (onboarding_username is None) != (onboarding_password is None):
+        raise AnsibleActionFail("onboarding.username and onboarding.password must be provided together")
+    if onboarding_username is not None and (not isinstance(onboarding_username, str) or not onboarding_username):
+        raise AnsibleActionFail("onboarding.username must be a non-empty string")
+    if onboarding_password is not None and not isinstance(onboarding_password, str):
+        raise AnsibleActionFail("onboarding.password must be a string")
+    passwordless_sudo = onboarding.get("passwordless_sudo", True)
+    if not isinstance(passwordless_sudo, bool):
+        raise AnsibleActionFail("onboarding.passwordless_sudo must be a boolean")
+
+    root = args.get("root", {})
+    if not isinstance(root, dict):
+        raise AnsibleActionFail("root must be a dictionary")
+    unknown_root = set(root) - {"username", "password", "login", "disable_after_onboarding"}
+    if unknown_root:
+        raise AnsibleActionFail(f"unknown root options: {', '.join(sorted(unknown_root))}")
+    root_username = root.get("username") or "root"
+    root_password = root.get("password")
+    root_login = root.get("login", True)
+    disable_root = root.get("disable_after_onboarding", False)
+    if not isinstance(root_username, str):
+        raise AnsibleActionFail("root.username must be a string")
+    if root_password is not None and not isinstance(root_password, str):
+        raise AnsibleActionFail("root.password must be a string")
+    if not isinstance(root_login, bool):
+        raise AnsibleActionFail("root.login must be a boolean")
+    if not isinstance(disable_root, bool):
+        raise AnsibleActionFail("root.disable_after_onboarding must be a boolean")
+    if disable_root and onboarding_username is None:
+        raise AnsibleActionFail("root.disable_after_onboarding requires an onboarding user")
+
+    install_sudo = args.get("install_sudo", True)
+    return_password = args.get("return_password", False)
+    if not isinstance(install_sudo, bool):
+        raise AnsibleActionFail("install_sudo must be a boolean")
+    if not isinstance(return_password, bool):
+        raise AnsibleActionFail("return_password must be a boolean")
+
+    return {
+        "onboarding": {
+            "username": onboarding_username,
+            "password": onboarding_password,
+            "passwordless_sudo": passwordless_sudo,
+        },
+        "root": {
+            "username": root_username,
+            "password": root_password,
+            "login": root_login,
+            "disable_after_onboarding": disable_root,
+        },
+        "install_sudo": install_sudo,
+        "return_password": return_password,
+    }
+
+
+def _ordered_candidates(workflow: dict[str, Any], credentials: list[dict[str, str]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    onboarding = workflow["onboarding"]
+    root = workflow["root"]
+    if onboarding["username"] is not None:
+        candidates.append(
+            {"username": onboarding["username"], "password": onboarding["password"], "source": "onboarding"}
+        )
+    if root["login"] and root["password"] is not None:
+        candidates.append({"username": root["username"], "password": root["password"], "source": "root"})
+    candidates.extend({**candidate, "source": "credentials"} for candidate in credentials)
+
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        key = (candidate["username"], candidate["password"])
+        if key not in seen:
+            unique.append(candidate)
+            seen.add(key)
+    return unique
 
 def _ssh_command(host: str, port: int, username: str, host_key_checking: str) -> list[str]:
     return [

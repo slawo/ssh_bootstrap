@@ -46,6 +46,39 @@ class FakeChild:
 
 
 class DiscoverCredentialsTests(unittest.TestCase):
+    def test_workflow_defaults(self):
+        workflow = MODULE._validated_workflow({})
+        self.assertEqual(workflow["root"]["username"], "root")
+        self.assertTrue(workflow["root"]["login"])
+        self.assertTrue(workflow["install_sudo"])
+        self.assertTrue(workflow["onboarding"]["passwordless_sudo"])
+        self.assertFalse(workflow["return_password"])
+
+    def test_onboarding_requires_username_and_password(self):
+        with self.assertRaisesRegex(Exception, "must be provided together"):
+            MODULE._validated_workflow({"onboarding": {"username": "automation"}})
+
+    def test_disabling_root_requires_onboarding_user(self):
+        with self.assertRaisesRegex(Exception, "requires an onboarding user"):
+            MODULE._validated_workflow({"root": {"disable_after_onboarding": True}})
+
+    def test_candidate_order_and_deduplication(self):
+        workflow = MODULE._validated_workflow(
+            {
+                "onboarding": {"username": "automation", "password": "user-secret"},
+                "root": {"password": "root-secret"},
+            }
+        )
+        candidates = MODULE._ordered_candidates(
+            workflow,
+            [
+                {"username": "root", "password": "root-secret"},
+                {"username": "factory", "password": "factory-secret"},
+            ],
+        )
+        self.assertEqual([candidate["source"] for candidate in candidates], ["onboarding", "root", "credentials"])
+        self.assertEqual(candidates[-1]["username"], "factory")
+
     def run_attempt(self, matches, onboarding=None, debug=False):
         child = FakeChild(matches)
         with patch.object(MODULE.pexpect, "spawn", return_value=child):
