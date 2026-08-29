@@ -1,8 +1,9 @@
-FROM mcr.microsoft.com/devcontainers/python:1-3.12-bookworm
+FROM mcr.microsoft.com/devcontainers/base:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    PATH=/opt/ssh-bootstrap-venv/bin:${PATH}
 
 RUN printf '%s\n' \
         'Acquire::Retries "5";' \
@@ -28,6 +29,8 @@ RUN apt-get update --no-list-cleanup \
         netcat-openbsd \
         openssh-client \
         procps \
+        python3 \
+        python3-venv \
         rsync \
         shellcheck \
         socat \
@@ -41,5 +44,7 @@ RUN apt-get update --no-list-cleanup \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-dev.txt /tmp/ssh-bootstrap-requirements-dev.txt
-RUN python -m pip install --no-cache-dir --requirement /tmp/ssh-bootstrap-requirements-dev.txt \
+RUN python3 -m venv /opt/ssh-bootstrap-venv \
+    && /opt/ssh-bootstrap-venv/bin/python -m pip install --no-cache-dir \
+        --requirement /tmp/ssh-bootstrap-requirements-dev.txt \
     && rm /tmp/ssh-bootstrap-requirements-dev.txt
