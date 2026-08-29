@@ -238,15 +238,17 @@ jobs:
         with:
           release: "7.9"
           copyback: false
+          cache-after-prepare: true
+          debug-on-error: ${{ vars.DEBUG_ON_ERROR == 'true' }}
           prepare: |
             export PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/bin
             /usr/sbin/pkg_add ansible-core py3-pexpect || exit 11
             /usr/sbin/useradd -m -s /bin/ksh -p "$(/usr/bin/encrypt integration-secret)" bootstrap || exit 12
             printf '%s\n' 'permit nopass bootstrap as root' > /etc/doas.conf || exit 13
             chmod 0600 /etc/doas.conf || exit 14
-            /usr/sbin/sshd -f tests/integration/fixtures/openbsd/sshd_config || exit 15
           run: |
             export PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/bin
+            /usr/sbin/sshd -f tests/integration/fixtures/openbsd/sshd_config || exit 20
             /usr/local/bin/ansible-galaxy collection build --output-path dist --force || exit 21
             /usr/local/bin/ansible-galaxy collection install --force dist/slawo-ssh_bootstrap-*.tar.gz || exit 22
             /usr/local/bin/ansible-playbook tests/integration/platform.yml -e expect_method=doas || exit 23
