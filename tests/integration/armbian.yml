@@ -5,7 +5,8 @@
   gather_facts: false
   vars:
     armbian_initial_password: '1234'
-    onboarding_password: integration-new-secret
+    root_password: integration-root-secret
+    user_password: integration-user-secret
   tasks:
     - name: Discover the default login and complete Armbian onboarding
       slawo.ssh_bootstrap.discover_credentials:
@@ -18,7 +19,8 @@
             password: "{{ armbian_initial_password }}"
         onboarding:
           username: automation
-          password: "{{ onboarding_password }}"
+          password: "{{ root_password }}"
+          user_password: "{{ user_password }}"
         host_key_checking: accept-new
         timeout: 5
       register: discovery
@@ -30,6 +32,64 @@
           - discovery.changed
           - discovery.attempts == 2
           - discovery.credentials.username == 'automation'
-          - discovery.credentials.password == onboarding_password
+          - discovery.credentials.password == user_password
           - not discovery.onboarding_cancelled
       no_log: true
+
+    - name: Verify the changed root password can log in
+      slawo.ssh_bootstrap.discover_credentials:
+        host: 127.0.0.1
+        port: 22223
+        credentials:
+          - username: root
+            password: "{{ root_password }}"
+        host_key_checking: accept-new
+        timeout: 5
+      register: root_login
+      no_log: true
+
+    - name: Verify root login result
+      ansible.builtin.assert:
+        that:
+          - not root_login.changed
+          - root_login.credentials.username == 'root'
+          - root_login.credentials.password == root_password
+      no_log: true
+
+    - name: Verify the created user and its different password can log in
+      slawo.ssh_bootstrap.discover_credentials:
+        host: 127.0.0.1
+        port: 22223
+        credentials:
+          - username: automation
+            password: "{{ user_password }}"
+        host_key_checking: accept-new
+        timeout: 5
+      register: user_login
+      no_log: true
+
+    - name: Verify created-user login result
+      ansible.builtin.assert:
+        that:
+          - not user_login.changed
+          - user_login.credentials.username == 'automation'
+          - user_login.credentials.password == user_password
+      no_log: true
+
+    - name: Read the created user's groups from the fixture
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - ssh-bootstrap-armbian
+          - id
+          - --name
+          - --groups
+          - automation
+      register: user_groups
+      changed_when: false
+
+    - name: Verify the created user has sudo access
+      ansible.builtin.assert:
+        that:
+          - "'sudo' in user_groups.stdout.split()"

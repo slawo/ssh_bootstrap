@@ -1,4 +1,4 @@
-AllowUsers root
+AllowUsers root automation
 ForceCommand /usr/local/sbin/armbian-first-login
 KbdInteractiveAuthentication no
 ListenAddress 0.0.0.0

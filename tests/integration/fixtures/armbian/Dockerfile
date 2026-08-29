@@ -1,7 +1,7 @@
 FROM debian:13-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-server \
+    && apt-get install -y --no-install-recommends openssh-server sudo \
     && echo 'root:1234' | chpasswd \
     && mkdir -p /run/sshd \
     && rm -rf /var/lib/apt/lists/*

@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+if [ -e /var/lib/armbian-first-login-complete ]; then
+    exec /bin/sh -c "${SSH_ORIGINAL_COMMAND:-:}"
+fi
+
 printf 'Welcome to Armbian!\n\nCreate root password: '
 read -r root_password
 printf 'Repeat root password: '
@@ -18,8 +22,10 @@ read -r repeated_user_password
 [ "$user_password" = "$repeated_user_password" ] || exit 1
 useradd --create-home --shell /bin/sh "$username"
 printf '%s:%s\n' "$username" "$user_password" | chpasswd
+usermod --append --groups sudo "$username"
 
 printf 'Please provide your real name: '
 read -r real_name
 [ -z "$real_name" ] || exit 1
+touch /var/lib/armbian-first-login-complete
 printf '\n__ANSIBLE_SSH_BOOTSTRAP_OK__\n'

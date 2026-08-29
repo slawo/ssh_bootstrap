@@ -109,12 +109,19 @@ def _attempt(
     onboarding_seen = False
     pending_password_change = False
     pending_created_user_password = False
+    active_password_kind: str | None = None
+    password_changed = False
+    created_user = False
     transcript: list[str] = []
 
     def outcome(**values: Any) -> dict[str, Any]:
+        if password_changed:
+            values["password_changed"] = True
+        if created_user:
+            values["created_user"] = True
         if debug:
             session = "".join(transcript)
-            secrets = [candidate["password"], onboarding.get("password")]
+            secrets = [candidate["password"], onboarding.get("password"), onboarding.get("user_password")]
             for secret in secrets:
                 if isinstance(secret, str) and secret:
                     session = session.replace(secret, "********")
@@ -138,13 +145,36 @@ def _attempt(
             elif matched in (2, 3):
                 authenticated = True
                 onboarding_seen = True
-                new_password = onboarding.get("password")
+                prompt = child.after if isinstance(child.after, str) else ""
+                if matched == 2:
+                    active_password_kind = (
+                        "user"
+                        if pending_created_user_password
+                        or re.search(r"(?i)\buser(?:\s+\([^)]+\))?\s+password", prompt)
+                        else "account"
+                    )
+                elif active_password_kind is None:
+                    active_password_kind = (
+                        "user"
+                        if re.search(r"(?i)\buser(?:\s+\([^)]+\))?\s+password", prompt)
+                        else "account"
+                    )
+                new_password = (
+                    onboarding.get("user_password", onboarding.get("password"))
+                    if active_password_kind == "user"
+                    else onboarding.get("password")
+                )
                 if not isinstance(new_password, str) or not new_password:
                     child.sendcontrol("c")
                     return outcome(success=True, authenticated=True, changed=False, cancelled=True)
                 child.sendline(new_password)
                 changed = True
-                pending_password_change = False
+                if matched == 2 and active_password_kind == "user":
+                    created_user = True
+                    pending_created_user_password = False
+                elif matched == 2:
+                    password_changed = True
+                    pending_password_change = False
             elif matched == 4:
                 authenticated = True
                 onboarding_seen = True
@@ -160,12 +190,21 @@ def _attempt(
             elif matched == 6:
                 if login_password_sent or authenticated:
                     if pending_password_change or pending_created_user_password:
-                        new_password = onboarding.get("password")
+                        password_kind = "user" if pending_created_user_password else "account"
+                        new_password = (
+                            onboarding.get("user_password", onboarding.get("password"))
+                            if password_kind == "user"
+                            else onboarding.get("password")
+                        )
                         if not isinstance(new_password, str) or not new_password:
                             child.sendcontrol("c")
                             return outcome(success=True, authenticated=True, changed=changed, cancelled=True)
                         child.sendline(new_password)
                         changed = True
+                        if password_kind == "user":
+                            created_user = True
+                        else:
+                            password_changed = True
                         pending_password_change = False
                         pending_created_user_password = False
                     else:
@@ -266,8 +305,15 @@ class ActionModule(ActionBase):
                     result["sessions"] = debug_sessions
                 return result
             if attempt.get("success"):
-                effective_username = onboarding.get("username") if attempt.get("changed") and onboarding.get("username") else candidate["username"]
-                effective_password = onboarding.get("password") if attempt.get("changed") and onboarding.get("password") else candidate["password"]
+                if attempt.get("created_user"):
+                    effective_username = onboarding["username"]
+                    effective_password = onboarding.get("user_password", onboarding.get("password"))
+                elif attempt.get("password_changed"):
+                    effective_username = candidate["username"]
+                    effective_password = onboarding["password"]
+                else:
+                    effective_username = candidate["username"]
+                    effective_password = candidate["password"]
                 result.update(
                     changed=attempt.get("changed", False),
                     credentials={"username": effective_username, "password": effective_password},

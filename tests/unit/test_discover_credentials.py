@@ -68,6 +68,7 @@ class DiscoverCredentialsTests(unittest.TestCase):
         result, child = self.run_attempt([6, 1, 2, 3, 0], {"password": "new-secret"})
         self.assertTrue(result["success"])
         self.assertTrue(result["changed"])
+        self.assertTrue(result["password_changed"])
         self.assertEqual(child.sent, ["factory-secret", "factory-secret", "new-secret", "new-secret"])
 
     def test_missing_new_password_cancels(self):
@@ -78,11 +79,33 @@ class DiscoverCredentialsTests(unittest.TestCase):
 
     def test_create_user_and_password(self):
         result, child = self.run_attempt(
-            [6, 4, 2, 3, 5, 0],
-            {"username": "automation", "password": "new-secret"},
+            [
+                6,
+                4,
+                (2, "", "Create user (Automation) password:"),
+                (3, "", "Repeat user (Automation) password:"),
+                5,
+                0,
+            ],
+            {"username": "automation", "password": "account-secret", "user_password": "user-secret"},
         )
         self.assertTrue(result["changed"])
-        self.assertEqual(child.sent, ["factory-secret", "automation", "new-secret", "new-secret", ""])
+        self.assertTrue(result["created_user"])
+        self.assertEqual(child.sent, ["factory-secret", "automation", "user-secret", "user-secret", ""])
+
+    def test_created_user_password_falls_back_to_account_password(self):
+        result, child = self.run_attempt(
+            [
+                6,
+                4,
+                (2, "", "Create user (Automation) password:"),
+                (3, "", "Repeat user (Automation) password:"),
+                0,
+            ],
+            {"username": "automation", "password": "shared-secret"},
+        )
+        self.assertTrue(result["created_user"])
+        self.assertEqual(child.sent, ["factory-secret", "automation", "shared-secret", "shared-secret"])
 
     def test_armbian_prompt_patterns(self):
         prompts = MODULE.DEFAULT_PROMPTS
@@ -104,13 +127,14 @@ class DiscoverCredentialsTests(unittest.TestCase):
             [
                 (6, "factory-secret before ", "Password:"),
                 (2, " new-secret echoed ", "New password:"),
-                (0, "factory-secret new-secret ", MODULE.SUCCESS_MARKER),
+                (0, "factory-secret new-secret user-secret ", MODULE.SUCCESS_MARKER),
             ],
-            {"password": "new-secret"},
+            {"password": "new-secret", "user_password": "user-secret"},
             debug=True,
         )
         self.assertNotIn("factory-secret", result["session"])
         self.assertNotIn("new-secret", result["session"])
+        self.assertNotIn("user-secret", result["session"])
         self.assertIn("********", result["session"])
 
     def test_password_is_not_in_process_arguments(self):

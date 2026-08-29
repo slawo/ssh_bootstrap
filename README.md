@@ -67,6 +67,7 @@ vault_bootstrap_credentials:
 | `host_key_checking` | no | `yes` | `yes` requires a trusted key; `accept-new` trusts only unseen keys. |
 | `onboarding.username` | no | | Value for a create-user prompt. |
 | `onboarding.password` | no | | Value for new/repeat-password prompts. |
+| `onboarding.user_password` | no | `onboarding.password` | Password for a newly created user, when it must differ from the authenticated account's new password. |
 | `prompt_patterns` | no | built-ins | Named Python regex overrides for unusual appliances. |
 | `debug` | no | `false` | Return sanitized per-attempt SSH sessions in `sessions`. |
 
