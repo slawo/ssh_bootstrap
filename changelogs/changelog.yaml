@@ -1,0 +1,5 @@
+releases:
+  0.1.0:
+    release_date: '2026-08-29'
+    changes:
+      release_summary: Initial SSH bootstrap action plugin with opt-in debug sessions and expanded first-login prompt handling.

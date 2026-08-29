@@ -1,0 +1,67 @@
+---
+name: release-artifacts
+
+on:
+  workflow_call:
+    inputs:
+      release_sha:
+        description: Commit SHA tagged by Release Please
+        required: true
+        type: string
+      release_tag:
+        description: GitHub release tag
+        required: true
+        type: string
+
+permissions:
+  attestations: write
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    if: github.repository == 'slawo/ansible-ssh-bootstrap'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out released commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: python -m pip install "ansible-core~=2.21.0"
+
+      - name: Build Galaxy collection
+        run: ansible-galaxy collection build --output-path dist
+
+      - name: Attest collection artifact
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/slawo-ssh_bootstrap-*.tar.gz
+
+      - name: Attach artifact to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.release_tag }}" dist/slawo-ssh_bootstrap-*.tar.gz --clobber
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.release_tag }}-collection
+          path: dist/slawo-ssh_bootstrap-*.tar.gz
+          retention-days: 7
+
+      - name: Publish collection to Ansible Galaxy
+        if: vars.PUBLISH_TO_GALAXY == 'true'
+        env:
+          GALAXY_API_KEY: ${{ secrets.GALAXY_API_KEY }}
+        run: >-
+          ansible-galaxy collection publish
+          dist/slawo-ssh_bootstrap-*.tar.gz
+          --token "$GALAXY_API_KEY"
