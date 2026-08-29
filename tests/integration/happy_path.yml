@@ -18,7 +18,6 @@
         host_key_checking: accept-new
         timeout: 5
       register: discovery
-      no_log: true
 
     - name: Verify the successful candidate was returned
       ansible.builtin.assert:
@@ -32,4 +31,3 @@
           - discovery.become.enabled
           - discovery.become.method == 'sudo'
           - discovery.become.user == 'root'
-      no_log: true
