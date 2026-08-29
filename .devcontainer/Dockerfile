@@ -4,8 +4,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends \
+RUN printf '%s\n' \
+        'Acquire::Retries "5";' \
+        'Acquire::http::Timeout "30";' \
+        'Acquire::https::Timeout "30";' \
+        'APT::Update::Error-Mode "any";' \
+        > /etc/apt/apt.conf.d/80-ssh-bootstrap-retries
+
+RUN apt-get update --no-list-cleanup \
+    && apt-get install --yes --no-install-recommends --no-install-suggests \
         bash-completion \
         ca-certificates \
         curl \

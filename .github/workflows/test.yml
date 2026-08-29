@@ -10,6 +10,24 @@ permissions:
   contents: read
 
 jobs:
+  devcontainer:
+    name: Development container
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build and smoke-test development container
+        uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3
+        with:
+          push: never
+          runCmd: >-
+            python3 -m unittest discover -s tests/unit -v
+            && ansible-lint .
+            && docker version
+            && docker compose version
+            && gh --version
+
   collection:
     name: ansible-core ${{ matrix.ansible_core }}
     runs-on: ubuntu-latest
