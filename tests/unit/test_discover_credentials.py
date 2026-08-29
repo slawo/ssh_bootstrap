@@ -86,8 +86,11 @@ class DiscoverCredentialsTests(unittest.TestCase):
 
     def test_armbian_prompt_patterns(self):
         prompts = MODULE.DEFAULT_PROMPTS
+        self.assertRegex("(current) UNIX password:", prompts["current_password"])
         self.assertRegex("Create root password:", prompts["new_password"])
         self.assertRegex("Create user (Jane) password:", prompts["new_password"])
+        self.assertRegex("Repeat root password:", prompts["repeat_password"])
+        self.assertRegex("Repeat user (Jane) password:", prompts["repeat_password"])
         self.assertRegex("Please provide a username (eg. your first name):", prompts["new_username"])
         self.assertRegex("Please provide your real name:", prompts["ignored_name"])
         self.assertRegex("Enter first name:", prompts["ignored_name"])
@@ -114,6 +117,7 @@ class DiscoverCredentialsTests(unittest.TestCase):
         command = MODULE._ssh_command("node.example", 2222, "root", "yes")
         self.assertNotIn("secret", command)
         self.assertIn("root@node.example", command)
+        self.assertIn("-tt", command)
         self.assertIn("StrictHostKeyChecking=yes", command)
 
 

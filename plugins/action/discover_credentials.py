@@ -20,12 +20,12 @@ except ImportError:  # pragma: no cover - exercised on controllers without pexpe
 SUCCESS_MARKER = "__ANSIBLE_SSH_BOOTSTRAP_OK__"
 DEFAULT_PROMPTS = {
     "login_password": r"(?i)(?:password|passphrase)\s*:\s*$",
-    "current_password": r"(?i)current(?:\s+unix)?\s+password\s*:\s*$",
+    "current_password": r"(?i)\(?current\)?(?:\s+unix)?\s+password\s*:\s*$",
     "new_password": (
         r"(?i)(?:(?:enter\s+)?new(?:\s+unix)?\s+password|"
         r"create\s+(?:root|user(?:\s+\([^)]+\))?)\s+password)\s*:\s*$"
     ),
-    "repeat_password": r"(?i)(?:retype|repeat|confirm)(?:\s+new)?\s+password\s*:\s*$",
+    "repeat_password": r"(?i)(?:retype|repeat|confirm)(?:\s+new)?(?:\s+(?:root|user(?:\s+\([^)]+\))?))?\s+password\s*:\s*$",
     "new_username": (
         r"(?i)(?:please\s+)?(?:provide|enter|create|choose)(?:\s+(?:a|new))?\s+"
         r"user(?:name)?(?:\s+\([^\r\n]*\))?\s*:\s*$"
@@ -58,7 +58,7 @@ def _validated_credentials(value: Any) -> list[dict[str, str]]:
 def _ssh_command(host: str, port: int, username: str, host_key_checking: str) -> list[str]:
     return [
         "ssh",
-        "-T",
+        "-tt",
         "-p",
         str(port),
         "-o",

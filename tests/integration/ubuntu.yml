@@ -1,0 +1,32 @@
+---
+- name: Verify Ubuntu first-login password change
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ubuntu_initial_password: ubuntu
+    onboarding_password: integration-new-secret
+  tasks:
+    - name: Log in with the default account and change its expired password
+      slawo.ssh_bootstrap.discover_credentials:
+        host: 127.0.0.1
+        port: 22224
+        credentials:
+          - username: ubuntu
+            password: "{{ ubuntu_initial_password }}"
+        onboarding:
+          password: "{{ onboarding_password }}"
+        host_key_checking: accept-new
+        timeout: 10
+      register: discovery
+      no_log: true
+
+    - name: Verify Ubuntu returned the updated account
+      ansible.builtin.assert:
+        that:
+          - discovery.changed
+          - discovery.attempts == 1
+          - discovery.credentials.username == 'ubuntu'
+          - discovery.credentials.password == onboarding_password
+          - not discovery.onboarding_cancelled
+      no_log: true

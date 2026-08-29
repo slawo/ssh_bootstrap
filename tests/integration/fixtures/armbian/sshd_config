@@ -1,0 +1,9 @@
+AllowUsers root
+ForceCommand /usr/local/sbin/armbian-first-login
+KbdInteractiveAuthentication no
+ListenAddress 0.0.0.0
+PasswordAuthentication yes
+PermitRootLogin yes
+PidFile /run/sshd.pid
+PrintMotd no
+UsePAM no

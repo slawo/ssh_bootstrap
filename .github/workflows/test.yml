@@ -55,7 +55,7 @@ jobs:
         run: ansible-galaxy collection build --output-path dist --force
 
   integration:
-    name: SSH happy path
+    name: SSH integration
     runs-on: ubuntu-latest
 
     steps:
@@ -78,32 +78,53 @@ jobs:
             --force \
             dist/slawo-ssh_bootstrap-*.tar.gz
 
-      - name: Build SSH fixture
-        run: docker build --tag ssh-bootstrap-integration tests/integration/fixtures/sshd
-
-      - name: Start SSH fixture
-        run: docker run --detach --name ssh-bootstrap-integration --publish 22222:22 ssh-bootstrap-integration
-
-      - name: Wait for SSH fixture
+      - name: Build SSH fixtures
         run: |
-          for attempt in $(seq 1 30); do
-            if ssh-keyscan -p 22222 127.0.0.1 >/dev/null 2>&1; then
-              exit 0
-            fi
-            sleep 1
-          done
-          docker logs ssh-bootstrap-integration
-          exit 1
+          docker build --tag ssh-bootstrap-basic tests/integration/fixtures/sshd
+          docker build --tag ssh-bootstrap-armbian tests/integration/fixtures/armbian
+          docker build --tag ssh-bootstrap-ubuntu tests/integration/fixtures/ubuntu
 
-      - name: Run happy-path integration test
+      - name: Start SSH fixtures
+        run: |
+          docker run --detach --name ssh-bootstrap-basic --publish 22222:22 ssh-bootstrap-basic
+          docker run --detach --name ssh-bootstrap-armbian --publish 22223:22 ssh-bootstrap-armbian
+          docker run --detach --name ssh-bootstrap-ubuntu --publish 22224:22 ssh-bootstrap-ubuntu
+
+      - name: Wait for SSH fixtures
+        run: |
+          for port in 22222 22223 22224; do
+            ready=false
+            for attempt in $(seq 1 30); do
+              if ssh-keyscan -p "${port}" 127.0.0.1 >/dev/null 2>&1; then
+                ready=true
+                break
+              fi
+              sleep 1
+            done
+            if [ "${ready}" != true ]; then
+              echo "SSH fixture on port ${port} did not become ready"
+              exit 1
+            fi
+          done
+
+      - name: Run SSH integration tests
         env:
           ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/collections
-        run: ansible-playbook tests/integration/happy_path.yml
+        run: |
+          ansible-playbook tests/integration/happy_path.yml
+          ansible-playbook tests/integration/armbian.yml
+          ansible-playbook tests/integration/ubuntu.yml
 
       - name: Show SSH fixture logs after failure
         if: failure()
-        run: docker logs ssh-bootstrap-integration
+        run: |
+          docker logs ssh-bootstrap-basic || true
+          docker logs ssh-bootstrap-armbian || true
+          docker logs ssh-bootstrap-ubuntu || true
 
-      - name: Remove SSH fixture
+      - name: Remove SSH fixtures
         if: always()
-        run: docker rm --force ssh-bootstrap-integration
+        run: |
+          docker rm --force ssh-bootstrap-basic || true
+          docker rm --force ssh-bootstrap-armbian || true
+          docker rm --force ssh-bootstrap-ubuntu || true

@@ -1,0 +1,35 @@
+---
+- name: Verify Armbian first-login onboarding
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    armbian_initial_password: '1234'
+    onboarding_password: integration-new-secret
+  tasks:
+    - name: Discover the default login and complete Armbian onboarding
+      slawo.ssh_bootstrap.discover_credentials:
+        host: 127.0.0.1
+        port: 22223
+        credentials:
+          - username: root
+            password: rejected-secret
+          - username: root
+            password: "{{ armbian_initial_password }}"
+        onboarding:
+          username: automation
+          password: "{{ onboarding_password }}"
+        host_key_checking: accept-new
+        timeout: 5
+      register: discovery
+      no_log: true
+
+    - name: Verify Armbian returned the created account
+      ansible.builtin.assert:
+        that:
+          - discovery.changed
+          - discovery.attempts == 2
+          - discovery.credentials.username == 'automation'
+          - discovery.credentials.password == onboarding_password
+          - not discovery.onboarding_cancelled
+      no_log: true
