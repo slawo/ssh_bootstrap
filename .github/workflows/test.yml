@@ -242,7 +242,7 @@ jobs:
             pkg_add ansible-core py3-pexpect sudo
             useradd -m -s /bin/ksh -p "$(encrypt integration-secret)" bootstrap
             echo 'bootstrap ALL=(ALL) ALL' >> /etc/sudoers
-            visudo -c
+            /usr/local/sbin/visudo -c
             /usr/sbin/sshd -f tests/integration/fixtures/openbsd/sshd_config
           run: |
             ansible-galaxy collection build --output-path dist --force
