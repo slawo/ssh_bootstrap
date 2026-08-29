@@ -28,8 +28,6 @@ RUN apt-get update --no-list-cleanup \
         netcat-openbsd \
         openssh-client \
         procps \
-        qemu-system-x86 \
-        qemu-utils \
         rsync \
         shellcheck \
         socat \
