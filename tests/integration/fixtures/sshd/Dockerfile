@@ -1,9 +1,12 @@
 FROM debian:13-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-server \
+    && apt-get install -y --no-install-recommends openssh-server sudo \
     && useradd --create-home --shell /bin/sh bootstrap \
     && echo 'bootstrap:integration-secret' | chpasswd \
+    && printf '%s\n' 'bootstrap ALL=(ALL:ALL) ALL' > /etc/sudoers.d/bootstrap \
+    && chmod 0440 /etc/sudoers.d/bootstrap \
+    && visudo -cf /etc/sudoers.d/bootstrap \
     && mkdir -p /run/sshd \
     && rm -rf /var/lib/apt/lists/*
 
