@@ -1,9 +1,12 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
-RUN dnf install -y openssh-server shadow-utils \
+RUN dnf install -y openssh-server shadow-utils sudo \
     && useradd --create-home --shell /bin/sh bootstrap \
     && echo 'bootstrap:integration-secret' | chpasswd \
+    && printf '%s\n' 'bootstrap ALL=(ALL:ALL) ALL' > /etc/sudoers.d/bootstrap \
+    && chmod 0440 /etc/sudoers.d/bootstrap \
+    && visudo -cf /etc/sudoers.d/bootstrap \
     && mkdir -p /run/sshd \
     && ssh-keygen -A \
     && dnf clean all

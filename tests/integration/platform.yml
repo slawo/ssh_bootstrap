@@ -28,5 +28,9 @@
           - discovery.attempts == 2
           - discovery.credentials.username == 'bootstrap'
           - discovery.credentials.password == integration_password
-          - not discovery.onboarding_cancelled
+          - discovery.credentials.uid | int > 0
+          - not discovery.credentials.is_root
+          - discovery.become.enabled
+          - discovery.become.method == 'sudo'
+          - discovery.become.user == 'root'
       no_log: true
