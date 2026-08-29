@@ -1,0 +1,8 @@
+AllowUsers bootstrap
+KbdInteractiveAuthentication no
+ListenAddress 127.0.0.1
+PasswordAuthentication yes
+PermitRootLogin no
+PidFile /var/run/sshd-bootstrap.pid
+Port 22225
+PrintMotd no

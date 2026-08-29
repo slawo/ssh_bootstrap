@@ -1,0 +1,8 @@
+AllowUsers bootstrap
+KbdInteractiveAuthentication no
+ListenAddress 0.0.0.0
+PasswordAuthentication yes
+PermitRootLogin no
+PidFile /run/sshd.pid
+PrintMotd no
+UsePAM no

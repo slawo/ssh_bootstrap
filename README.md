@@ -6,7 +6,7 @@ The action plugin can also answer common forced-password-change and create-user 
 
 ## Requirements
 
-- `ansible-core >= 2.15`
+- `ansible-core >= 2.18`
 - OpenSSH `ssh` client and Python `pexpect` on the controller
 - Password or keyboard-interactive SSH authentication on the target
 
@@ -87,3 +87,20 @@ The result provides `credentials`, `attempts`, `changed`, and `onboarding_cancel
 python3 -m unittest discover -s collections/ansible_collections/local/ssh_bootstrap/tests/unit
 ansible-galaxy collection build collections/ansible_collections/local/ssh_bootstrap
 ```
+
+## Tested targets
+
+GitHub Actions runs credential discovery against the distribution-provided
+OpenSSH server on these targets:
+
+- Ubuntu 22.04, 24.04, and 26.04 LTS
+- Debian 12 LTS and Debian 13 stable
+- Fedora 44
+- Arch Linux rolling (`archlinux:latest`)
+- OpenBSD 7.9 in a QEMU virtual machine
+
+The versioned matrix is intentionally limited to releases in standard or
+community-supported maintenance. Ubuntu releases that require an Ubuntu Pro
+subscription are not part of the required CI gate. Arch is rolling and has no
+LTS release. Armbian onboarding is covered separately using its documented
+first-login prompt sequence.

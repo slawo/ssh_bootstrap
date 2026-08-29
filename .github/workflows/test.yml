@@ -128,3 +128,110 @@ jobs:
           docker rm --force ssh-bootstrap-basic || true
           docker rm --force ssh-bootstrap-armbian || true
           docker rm --force ssh-bootstrap-ubuntu || true
+
+  platform-integration:
+    name: SSH target / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 22.04 LTS
+            image: ubuntu:22.04
+            dockerfile: Dockerfile.apt
+          - name: Ubuntu 24.04 LTS
+            image: ubuntu:24.04
+            dockerfile: Dockerfile.apt
+          - name: Ubuntu 26.04 LTS
+            image: ubuntu:26.04
+            dockerfile: Dockerfile.apt
+          - name: Debian 12 LTS
+            image: debian:12
+            dockerfile: Dockerfile.apt
+          - name: Debian 13
+            image: debian:13
+            dockerfile: Dockerfile.apt
+          - name: Fedora 44
+            image: fedora:44
+            dockerfile: Dockerfile.fedora
+          - name: Arch rolling
+            image: archlinux:latest
+            dockerfile: Dockerfile.arch
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: python -m pip install "ansible-core~=2.21.0" pexpect
+
+      - name: Build and install collection artifact
+        run: |
+          ansible-galaxy collection build --output-path dist --force
+          ansible-galaxy collection install \
+            --collections-path "${RUNNER_TEMP}/collections" \
+            --force \
+            dist/slawo-ssh_bootstrap-*.tar.gz
+
+      - name: Build ${{ matrix.name }} SSH fixture
+        run: >-
+          docker build
+          --build-arg BASE_IMAGE=${{ matrix.image }}
+          --file tests/integration/fixtures/platforms/${{ matrix.dockerfile }}
+          --tag ssh-bootstrap-platform
+          tests/integration/fixtures/platforms
+
+      - name: Start ${{ matrix.name }} SSH fixture
+        run: >-
+          docker run --detach --name ssh-bootstrap-platform
+          --publish 22225:22 ssh-bootstrap-platform
+
+      - name: Wait for the SSH fixture
+        run: |
+          for attempt in $(seq 1 30); do
+            if ssh-keyscan -p 22225 127.0.0.1 >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs ssh-bootstrap-platform
+          exit 1
+
+      - name: Run platform integration test
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/collections
+        run: ansible-playbook tests/integration/platform.yml
+
+      - name: Show SSH fixture logs after failure
+        if: failure()
+        run: docker logs ssh-bootstrap-platform
+
+      - name: Remove SSH fixture
+        if: always()
+        run: docker rm --force ssh-bootstrap-platform
+
+  openbsd-integration:
+    name: SSH target / OpenBSD 7.9
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Test in an OpenBSD VM
+        uses: vmactions/openbsd-vm@86cdc08415d9d0865267e686561e276c52d62530 # v1.4.7
+        with:
+          release: "7.9"
+          copyback: false
+          prepare: |
+            pkg_add ansible-core py3-pexpect
+            useradd -m -s /bin/ksh -p "$(encrypt integration-secret)" bootstrap
+            /usr/sbin/sshd -f tests/integration/fixtures/openbsd/sshd_config
+          run: |
+            ansible-galaxy collection build --output-path dist --force
+            ansible-galaxy collection install --force dist/slawo-ssh_bootstrap-*.tar.gz
+            ansible-playbook tests/integration/platform.yml

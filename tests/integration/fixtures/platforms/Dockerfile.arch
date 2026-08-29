@@ -1,0 +1,15 @@
+FROM archlinux:latest
+
+RUN pacman --sync --refresh --sysupgrade --noconfirm \
+    && pacman --sync --noconfirm openssh \
+    && useradd --create-home --shell /bin/sh bootstrap \
+    && echo 'bootstrap:integration-secret' | chpasswd \
+    && mkdir -p /run/sshd \
+    && ssh-keygen -A \
+    && pacman --sync --clean --clean --noconfirm
+
+COPY sshd_config /etc/ssh/sshd_config
+
+EXPOSE 22
+
+CMD ["/usr/bin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config"]

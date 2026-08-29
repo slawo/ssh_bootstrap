@@ -1,0 +1,32 @@
+---
+- name: Verify credential discovery against a platform OpenSSH server
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    integration_password: integration-secret
+    integration_port: 22225
+  tasks:
+    - name: Try a rejected password followed by the platform password
+      slawo.ssh_bootstrap.discover_credentials:
+        host: 127.0.0.1
+        port: "{{ integration_port }}"
+        credentials:
+          - username: bootstrap
+            password: rejected-secret
+          - username: bootstrap
+            password: "{{ integration_password }}"
+        host_key_checking: accept-new
+        timeout: 10
+      register: discovery
+      no_log: true
+
+    - name: Verify platform credential discovery
+      ansible.builtin.assert:
+        that:
+          - not discovery.changed
+          - discovery.attempts == 2
+          - discovery.credentials.username == 'bootstrap'
+          - discovery.credentials.password == integration_password
+          - not discovery.onboarding_cancelled
+      no_log: true
