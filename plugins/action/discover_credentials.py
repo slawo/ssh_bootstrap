@@ -6,10 +6,39 @@ from __future__ import annotations
 
 import re
 import shlex
+import uuid
 from typing import Any
 
 from ansible.errors import AnsibleActionFail
 from ansible.plugins.action import ActionBase
+
+try:
+    from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._access import probe_access
+    from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._platform import (
+        detect_platform,
+        sudo_install_command,
+    )
+    from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._provision import (
+        build_provision_script,
+    )
+    from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._root_login import (
+        build_commit_root_login_script,
+        build_disable_root_login_script,
+    )
+    from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._ssh import (
+        run_command,
+        run_script,
+    )
+    from ansible_collections.slawo.ssh_bootstrap.plugins.plugin_utils._workflow import (
+        execute_workflow,
+    )
+except ImportError:  # pragma: no cover - permits direct source-tree unit tests
+    from plugins.plugin_utils._access import probe_access
+    from plugins.plugin_utils._platform import detect_platform, sudo_install_command
+    from plugins.plugin_utils._provision import build_provision_script
+    from plugins.plugin_utils._root_login import build_commit_root_login_script, build_disable_root_login_script
+    from plugins.plugin_utils._ssh import run_command, run_script
+    from plugins.plugin_utils._workflow import execute_workflow
 
 try:
     import pexpect
@@ -343,6 +372,7 @@ class ActionModule(ActionBase):
             raise AnsibleActionFail("host must be provided or resolvable from inventory")
 
         credentials = _validated_credentials(args.get("credentials"))
+        workflow = _validated_workflow(args)
         port = args.get("port", task_vars.get("ansible_port", 22))
         timeout = args.get("timeout", 10)
         debug = args.get("debug", False)
@@ -357,9 +387,6 @@ class ActionModule(ActionBase):
         if host_key_checking not in ("yes", "accept-new"):
             raise AnsibleActionFail("host_key_checking must be 'yes' or 'accept-new'")
 
-        onboarding = args.get("onboarding", {})
-        if not isinstance(onboarding, dict):
-            raise AnsibleActionFail("onboarding must be a dictionary")
         custom_prompts = args.get("prompt_patterns", {})
         if not isinstance(custom_prompts, dict):
             raise AnsibleActionFail("prompt_patterns must be a dictionary")
@@ -377,53 +404,76 @@ class ActionModule(ActionBase):
             result.update(changed=False, skipped=True, msg="credential discovery is not performed in check mode")
             return result
 
-        failures = []
+        candidates = _ordered_candidates(workflow, credentials)
+        if not candidates:
+            raise AnsibleActionFail("no SSH credential candidates were provided")
+
         debug_sessions = []
-        for candidate in credentials:
-            command = _ssh_command(host, port, candidate["username"], host_key_checking)
-            attempt = _attempt(command, candidate, onboarding, prompts, timeout, debug)
+
+        def prepare_candidate(candidate):
+            prompt_values = {
+                "username": workflow["onboarding"]["username"],
+                "user_password": workflow["onboarding"]["password"],
+                "password": (
+                    workflow["root"]["password"]
+                    if candidate["username"] == workflow["root"]["username"]
+                    else workflow["onboarding"]["password"]
+                ),
+            }
+            attempt = _attempt(
+                _ssh_command(host, port, candidate["username"], host_key_checking),
+                candidate,
+                prompt_values,
+                prompts,
+                timeout,
+                debug,
+            )
             if debug:
                 debug_sessions.append(
                     {
-                        "attempt": len(failures) + 1,
+                        "attempt": len(debug_sessions) + 1,
                         "username": candidate["username"],
                         "session": attempt.get("session", ""),
                         "reason": attempt.get("reason"),
                     }
                 )
-            if attempt.get("fatal"):
-                result.update(failed=True, changed=False, msg=attempt["reason"])
-                if debug:
-                    result["sessions"] = debug_sessions
-                return result
-            if attempt.get("success"):
-                if attempt.get("created_user"):
-                    effective_username = onboarding["username"]
-                    effective_password = onboarding.get("user_password", onboarding.get("password"))
-                elif attempt.get("password_changed"):
-                    effective_username = candidate["username"]
-                    effective_password = onboarding["password"]
-                else:
-                    effective_username = candidate["username"]
-                    effective_password = candidate["password"]
-                result.update(
-                    changed=attempt.get("changed", False),
-                    credentials={"username": effective_username, "password": effective_password},
-                    onboarding_cancelled=attempt.get("cancelled", False),
-                    attempts=len(failures) + 1,
-                )
-                if debug:
-                    result["sessions"] = debug_sessions
-                return result
-            failures.append(attempt.get("reason", "connection failed"))
+            prepared = dict(candidate)
+            if attempt.get("password_changed"):
+                prepared["password"] = prompt_values["password"]
+            return {
+                "success": attempt.get("success", False),
+                "fatal": attempt.get("fatal", False),
+                "reason": attempt.get("reason"),
+                "changed": attempt.get("changed", False),
+                "candidate": prepared,
+            }
 
-        result.update(
-            failed=True,
-            changed=False,
-            msg=f"none of the {len(credentials)} credential combinations succeeded",
-            attempts=len(credentials),
+        workflow_result = execute_workflow(
+            workflow=workflow,
+            candidates=candidates,
+            connection_base={
+                "host": host,
+                "port": port,
+                "host_key_checking": host_key_checking,
+                "timeout": timeout,
+                "debug": debug,
+            },
+            run_command=run_command,
+            run_script=run_script,
+            probe_access=probe_access,
+            detect_platform=detect_platform,
+            sudo_install_command=sudo_install_command,
+            build_provision_script=build_provision_script,
+            guard_token=uuid.uuid4().hex,
+            build_disable_root_login_script=build_disable_root_login_script,
+            build_commit_root_login_script=build_commit_root_login_script,
+            prepare_candidate=prepare_candidate,
         )
+        success = workflow_result.pop("success")
+        if not success:
+            workflow_result["failed"] = True
+            workflow_result["msg"] = workflow_result.pop("reason")
+        result.update(workflow_result)
         if debug:
             result["sessions"] = debug_sessions
         return result
-

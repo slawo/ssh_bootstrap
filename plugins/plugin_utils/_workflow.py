@@ -45,6 +45,51 @@ def _successful_result(
     return result
 
 
+def _disable_root_login(
+    *, workflow: dict[str, Any], user_candidate: dict[str, Any], connection_base: dict[str, Any],
+    run_script: Callable[..., dict[str, Any]], probe_access: Callable[..., dict[str, Any]],
+    run_command: Callable[..., dict[str, Any]],
+    guard_token: str, build_disable_root_login_script: Callable[..., str],
+    build_commit_root_login_script: Callable[..., str], attempts: int,
+) -> dict[str, Any]:
+    user_connection = _connection(connection_base, user_candidate)
+    common = {
+        **user_connection,
+        "become": True,
+        "sudo_password": user_connection["password"],
+        "secrets": (user_connection["password"],),
+    }
+    disabled = run_script(
+        **common,
+        script=build_disable_root_login_script(workflow["root"]["username"], guard_token),
+    )
+    if not disabled.get("success") or disabled.get("rc") != 0:
+        return {
+            "success": False, "changed": True, "attempts": attempts,
+            "reason": disabled.get("reason", "failed to disable privileged SSH login; rollback is pending"),
+        }
+
+    verified = probe_access(run_command, user_connection)
+    if not verified.get("success") or not verified.get("can_become"):
+        return {
+            "success": False, "changed": True, "attempts": attempts + 1,
+            "reason": "onboarding user failed SSH or sudo verification after disabling privileged login; rollback is pending",
+        }
+
+    committed = run_script(
+        **common,
+        script=build_commit_root_login_script(guard_token),
+    )
+    if not committed.get("success") or committed.get("rc") != 0:
+        return {
+            "success": False, "changed": True, "attempts": attempts + 1,
+            "reason": committed.get("reason", "failed to commit privileged SSH login disable; rollback is pending"),
+        }
+    return _successful_result(
+        user_candidate, verified, workflow, changed=True, attempts=attempts + 1
+    )
+
+
 def execute_workflow(
     *,
     workflow: dict[str, Any],
@@ -56,6 +101,10 @@ def execute_workflow(
     detect_platform: Callable[..., dict[str, Any]],
     sudo_install_command: Callable[..., str],
     build_provision_script: Callable[..., str],
+    guard_token: str,
+    build_disable_root_login_script: Callable[..., str],
+    build_commit_root_login_script: Callable[..., str],
+    prepare_candidate: Callable[[dict[str, Any]], dict[str, Any]],
 ) -> dict[str, Any]:
     privileged: tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
     failures = []
@@ -63,14 +112,43 @@ def execute_workflow(
 
     for candidate in candidates:
         attempts += 1
+        prepared = prepare_candidate(candidate)
+        if not prepared.get("success"):
+            failures.append(prepared.get("reason", "SSH login preparation failed"))
+            if prepared.get("fatal"):
+                return {
+                    "success": False,
+                    "changed": False,
+                    "attempts": attempts,
+                    "reason": prepared.get("reason", "fatal SSH login preparation failure"),
+                    "failures": failures,
+                }
+            continue
+        candidate = prepared.get("candidate", candidate)
         connection = _connection(connection_base, candidate)
         access = probe_access(run_command, connection)
         if not access.get("success"):
             failures.append(access.get("reason", "login or identity probe failed"))
             continue
         if candidate["source"] == "onboarding" and access.get("can_become"):
-            return _successful_result(candidate, access, workflow, changed=False, attempts=attempts)
+            if workflow["root"]["disable_after_onboarding"]:
+                return _disable_root_login(
+                    workflow=workflow, user_candidate=candidate, connection_base=connection_base,
+                    run_script=run_script, probe_access=probe_access,
+                    run_command=run_command, guard_token=guard_token,
+                    build_disable_root_login_script=build_disable_root_login_script,
+                    build_commit_root_login_script=build_commit_root_login_script,
+                    attempts=attempts,
+                )
+            return _successful_result(
+                candidate,
+                access,
+                workflow,
+                changed=prepared.get("changed", False),
+                attempts=attempts,
+            )
         if access.get("can_become"):
+            candidate["prepared_changed"] = prepared.get("changed", False)
             privileged = candidate, connection, access
             break
         failures.append(f"{candidate['username']} authenticated without UID 0 or working sudo")
@@ -88,7 +166,11 @@ def execute_workflow(
     onboarding = workflow["onboarding"]
     if onboarding["username"] is None:
         return _successful_result(
-            privileged_candidate, privileged_access, workflow, changed=False, attempts=attempts
+            privileged_candidate,
+            privileged_access,
+            workflow,
+            changed=privileged_candidate.get("prepared_changed", False),
+            attempts=attempts,
         )
 
     platform = detect_platform(run_command, privileged_connection)
@@ -153,6 +235,15 @@ def execute_workflow(
             "attempts": attempts + 1,
             "reason": "provisioned user failed SSH or sudo verification",
         }
+    if workflow["root"]["disable_after_onboarding"]:
+        return _disable_root_login(
+            workflow=workflow, user_candidate=user_candidate, connection_base=connection_base,
+            run_script=run_script, probe_access=probe_access,
+            run_command=run_command, guard_token=guard_token,
+            build_disable_root_login_script=build_disable_root_login_script,
+            build_commit_root_login_script=build_commit_root_login_script,
+            attempts=attempts + 1,
+        )
     return _successful_result(
         user_candidate, user_access, workflow, changed=True, attempts=attempts + 1
     )

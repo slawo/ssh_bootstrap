@@ -46,6 +46,12 @@ class WorkflowTests(unittest.TestCase):
             "detect_platform": overrides.get("detect_platform", QueueCallable([])),
             "sudo_install_command": lambda platform: "install sudo",
             "build_provision_script": lambda **kwargs: "provision user",
+            "guard_token": "a" * 32,
+            "build_disable_root_login_script": lambda username, token: "disable root login",
+            "build_commit_root_login_script": lambda token: "commit root login",
+            "prepare_candidate": overrides.get(
+                "prepare_candidate", lambda candidate: {"success": True, "candidate": candidate}
+            ),
         }
         result = MODULE.execute_workflow(
             workflow=overrides.get("workflow", self.config()),
@@ -62,6 +68,30 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("password", result["credentials"])
         self.assertEqual(result["become"], {"enabled": True, "method": "sudo", "user": "root"})
 
+    def test_root_login_disable_runs_from_verified_user_and_is_committed_after_reconnect(self):
+        workflow = self.config()
+        workflow["root"]["disable_after_onboarding"] = True
+        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
+        scripts = QueueCallable([{"success": True, "rc": 0}, {"success": True, "rc": 0}])
+        result, _deps = self.execute([access, access], workflow=workflow, run_script=scripts)
+        self.assertTrue(result["success"])
+        self.assertTrue(result["changed"])
+        self.assertEqual([call[1]["script"] for call in scripts.calls], ["disable root login", "commit root login"])
+        self.assertTrue(all(call[1]["username"] == "automation" for call in scripts.calls))
+        self.assertTrue(all(call[1]["become"] for call in scripts.calls))
+
+    def test_failed_reconnect_leaves_guard_uncommitted(self):
+        workflow = self.config()
+        workflow["root"]["disable_after_onboarding"] = True
+        access = {"success": True, "uid": 1000, "is_root": False, "sudo_available": True, "can_become": True}
+        scripts = QueueCallable([{"success": True, "rc": 0}])
+        result, _deps = self.execute(
+            [access, {"success": False, "reason": "rejected"}], workflow=workflow, run_script=scripts
+        )
+        self.assertFalse(result["success"])
+        self.assertIn("rollback is pending", result["reason"])
+        self.assertEqual(len(scripts.calls), 1)
+
     def test_unprivileged_login_is_skipped_before_root(self):
         unprivileged = {"success": True, "uid": 1000, "is_root": False, "sudo_available": False, "can_become": False}
         root = {"success": True, "uid": 0, "is_root": True, "sudo_available": True, "can_become": True}
@@ -74,6 +104,31 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertEqual(result["attempts"], 3)
         self.assertEqual(result["credentials"]["username"], "automation")
+
+    def test_preparation_can_replace_password_after_forced_change(self):
+        workflow = self.config()
+        workflow["onboarding"] = {"username": None, "password": None, "passwordless_sudo": True}
+        root = {"success": True, "uid": 0, "is_root": True, "sudo_available": True, "can_become": True}
+
+        def prepared(candidate):
+            return {"success": True, "changed": True, "candidate": {**candidate, "password": "new-secret"}}
+
+        result, _deps = self.execute([root], workflow=workflow, prepare_candidate=prepared)
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["credentials"]["username"], "automation")
+
+    def test_fatal_preparation_failure_stops_candidate_iteration(self):
+        result, deps = self.execute(
+            [],
+            prepare_candidate=lambda candidate: {
+                "success": False,
+                "fatal": True,
+                "reason": "host key rejected",
+            },
+        )
+        self.assertFalse(result["success"])
+        self.assertEqual(result["attempts"], 1)
+        self.assertEqual(len(deps["probe_access"].calls), 0)
 
     def test_default_list_password_is_always_returned(self):
         workflow = self.config()

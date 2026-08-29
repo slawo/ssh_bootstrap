@@ -1,6 +1,7 @@
 """Unit tests for the SSH credential discovery state machine."""
 
 from pathlib import Path
+from types import SimpleNamespace
 import importlib.util
 import unittest
 from unittest.mock import patch
@@ -92,6 +93,72 @@ class DiscoverCredentialsTests(unittest.TestCase):
             candidates,
             [{"username": "operator", "password": "operator-secret", "source": "credentials"}],
         )
+
+    def run_action(self, args, workflow_result=None, check_mode=False):
+        action = MODULE.ActionModule.__new__(MODULE.ActionModule)
+        action._task = SimpleNamespace(args=args, check_mode=check_mode)
+        patches = [
+            patch.object(MODULE.ActionBase, "run", return_value={}),
+            patch.object(
+                MODULE,
+                "execute_workflow",
+                return_value=workflow_result
+                or {
+                    "success": True,
+                    "changed": False,
+                    "attempts": 1,
+                    "credentials": {"username": "automation", "uid": 1000, "is_root": False},
+                    "become": {"enabled": True, "method": "sudo", "user": "root"},
+                },
+            ),
+        ]
+        with patches[0], patches[1] as execute:
+            result = action.run(task_vars={"inventory_hostname": "node.example"})
+        return result, execute
+
+    def test_action_dispatches_validated_candidates_to_workflow(self):
+        result, execute = self.run_action(
+            {
+                "onboarding": {"username": "automation", "password": "user-secret"},
+                "root": {"password": "root-secret"},
+                "credentials": [{"username": "factory", "password": "factory-secret"}],
+            }
+        )
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["credentials"]["username"], "automation")
+        call = execute.call_args.kwargs
+        self.assertEqual(
+            [candidate["source"] for candidate in call["candidates"]],
+            ["onboarding", "root", "credentials"],
+        )
+        self.assertEqual(call["connection_base"]["host"], "node.example")
+
+    def test_action_maps_workflow_failure_to_ansible_failure(self):
+        result, _execute = self.run_action(
+            {"credentials": [{"username": "root", "password": "bad"}]},
+            {
+                "success": False,
+                "changed": False,
+                "attempts": 1,
+                "reason": "no privileged access",
+                "failures": ["authentication rejected"],
+            },
+        )
+        self.assertTrue(result["failed"])
+        self.assertEqual(result["msg"], "no privileged access")
+        self.assertNotIn("reason", result)
+
+    def test_action_check_mode_does_not_execute_workflow(self):
+        result, execute = self.run_action(
+            {"credentials": [{"username": "root", "password": "secret"}]},
+            check_mode=True,
+        )
+        self.assertTrue(result["skipped"])
+        execute.assert_not_called()
+
+    def test_action_rejects_empty_candidate_set(self):
+        with self.assertRaisesRegex(Exception, "no SSH credential candidates"):
+            self.run_action({})
 
     def run_attempt(self, matches, onboarding=None, debug=False):
         child = FakeChild(matches)
